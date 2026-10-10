@@ -214,6 +214,51 @@ export function createWorldView(scene, terrain) {
   ring.name = 'highlight';
   root.add(ring);
 
+  // villager highlight: a small ring that follows the selected villager
+  const vRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.55, 0.68, 32).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x9fe0ff, transparent: true, opacity: 0.95, depthTest: false, side: THREE.DoubleSide }),
+  );
+  vRing.renderOrder = 10;
+  vRing.visible = false;
+  root.add(vRing);
+  let highlightVillagerId = null;
+  let lastState = null;
+
+  function updateVillagerHighlight(state) {
+    const v = highlightVillagerId == null ? null : state.villagers.find((x) => x.id === highlightVillagerId);
+    if (!v || v.role === 'sleeping') { vRing.visible = false; return; }
+    vRing.position.set(v.x, heightAt(terrain, v.x, v.z) + 0.08, v.z);
+    vRing.visible = true;
+  }
+
+  // Nearest villager whose body (a vertical segment ~0.2–1.9 m above ground) passes within 1.2 m of the ray.
+  const _seg0 = new THREE.Vector3();
+  const _seg1 = new THREE.Vector3();
+  const _onRay = new THREE.Vector3();
+  const _onSeg = new THREE.Vector3();
+  function pickVillager(raycaster) {
+    if (!lastState) return null;
+    let best = null;
+    let bestT = Infinity;
+    for (const v of lastState.villagers) {
+      if (v.role === 'sleeping') continue;
+      const y = heightAt(terrain, v.x, v.z);
+      _seg0.set(v.x, y + 0.2, v.z);
+      _seg1.set(v.x, y + 1.9, v.z);
+      const d2 = raycaster.ray.distanceSqToSegment(_seg0, _seg1, _onRay, _onSeg);
+      if (d2 > 1.2 * 1.2) continue;
+      const t = _onRay.distanceTo(raycaster.ray.origin);
+      if (t < bestT) { bestT = t; best = v.id; }
+    }
+    return best;
+  }
+
+  function setHighlightVillager(id) {
+    highlightVillagerId = id == null ? null : id;
+    if (highlightVillagerId == null) vRing.visible = false;
+  }
+
   function updateHighlight(state) {
     if (highlightId == null) { ring.visible = false; return; }
     const b = state.buildings.find((x) => x.id === highlightId);
@@ -239,6 +284,8 @@ export function createWorldView(scene, terrain) {
     fireflies.update(dt, night, fireflyFocus);
     villagerView.update(state, dt, clock);
     updateHighlight(state);
+    updateVillagerHighlight(state);
+    lastState = state;
   }
 
   function pickBuilding(raycaster) {
@@ -271,10 +318,11 @@ export function createWorldView(scene, terrain) {
     nodesView.dispose(); groundDetail.dispose(); smoke.dispose(); fireflies.dispose();
     villagerView.dispose();
     ring.geometry.dispose(); ring.material.dispose();
+    vRing.geometry.dispose(); vRing.material.dispose();
     zoneMats.residential.dispose(); zoneMats.field.dispose();
     scene.remove(root);
   }
 
   setNight(false);
-  return { sync, pickBuilding, setHighlight, setNight, dispose };
+  return { sync, pickBuilding, pickVillager, setHighlight, setHighlightVillager, setNight, dispose };
 }
