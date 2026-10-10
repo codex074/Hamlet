@@ -5,7 +5,8 @@ import { createCameraController } from './render/camera.js';
 import { createTerrainMesh } from './render/terrainMesh.js';
 import { createWorldView } from './render/world.js';
 import * as sim from './sim.js';
-import { saveGame, loadGame, clearSave } from './save.js';
+import { saveGame, loadGame, clearSave, deserialize } from './save.js';
+import { startSession } from './net/session.js';
 import { heightAt } from './terrain.js';
 import { SPAWN } from './config.js';
 import { createHUD } from './ui/hud.js';
@@ -40,11 +41,10 @@ function webglAvailable() {
   }
 }
 
-function boot() {
-  if (!webglAvailable()) {
-    showFatal('ไม่สามารถเปิด WebGL ได้ — กรุณาใช้ Safari หรือ Chrome รุ่นใหม่ และเปิดใช้การเร่งความเร็วด้วยฮาร์ดแวร์');
-    return;
-  }
+function boot(session) {
+  const cloud = session.mode === 'cloud';
+  if (cloud) document.body.classList.add('cloud');
+  if (loadingEl) loadingEl.textContent = 'กำลังสร้างหมู่บ้าน…';
 
   let sceneApi;
   try {
@@ -57,8 +57,26 @@ function boot() {
   const { renderer, scene, camera } = sceneApi;
 
   // ---------- world ----------
-  let state = loadGame();
-  if (!state) state = sim.createWorld(Math.floor(Math.random() * 2147483647) + 1);
+  let state = null;
+  if (cloud) {
+    try {
+      state = session.initialSave ? deserialize(session.initialSave) : sim.createWorld(Number(session.village.seed) || (session.village.id * 7919 + 1));
+    } catch (err) {
+      console.error(err);
+      showFatal(`โหลดหมู่บ้านไม่สำเร็จ: ${err.message || err}`);
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'btn primary';
+      back.style.marginLeft = '12px';
+      back.textContent = 'กลับไปเลือกหมู่บ้าน';
+      back.addEventListener('click', () => session.backToSelect());
+      loadingEl.appendChild(back);
+      return;
+    }
+  } else {
+    state = loadGame();
+    if (!state) state = sim.createWorld(Math.floor(Math.random() * 2147483647) + 1);
+  }
 
   const terrainView = createTerrainMesh(state.terrain);
   scene.add(terrainView.mesh);
@@ -94,8 +112,22 @@ function boot() {
 
   // ---------- saving ----------
   let skipSave = false;
+  const saver = cloud ? session.saver : null;
   function save() {
-    if (!skipSave) saveGame(state);
+    if (skipSave) return Promise.resolve(false);
+    if (saver) return saver.save(state);
+    saveGame(state);
+    return Promise.resolve(true);
+  }
+  // Cloud: save, then leave. Stays in the game (with a toast) if the server could not be reached.
+  async function leaveVillage(after) {
+    const ok = await save();
+    if (!ok) {
+      hud.toast('บันทึกไม่สำเร็จ — ยังไม่ออกจากหมู่บ้าน ลองใหม่อีกครั้ง');
+      return;
+    }
+    skipSave = true;
+    after();
   }
 
   let tools = null;
@@ -108,13 +140,16 @@ function boot() {
     closeInfo: () => tools && tools.deselect(),
     selectVillager: (id) => tools && tools.selectVillager(id),
     selectBuilding: (id) => tools && tools.selectBuilding(id),
-    saveGame: save,
+    saveGame: () => { save(); },
     newGame: () => {
       skipSave = true;
       clearSave();
       location.reload();
     },
     showHelp: () => showHelp(false),
+    cloud,
+    backToSelect: () => leaveVillage(() => session.backToSelect()),
+    logout: () => leaveVillage(() => session.logout()),
   };
 
   hud = createHUD(document.body, handlers);
@@ -124,6 +159,7 @@ function boot() {
     sim, hud, terrainHeight, pickGround, worldView, cameraController,
   });
   hud.setSpeedDisplay(speed);
+  if (saver) saver.setStatusListener((s) => hud.setSaveStatus(s.kind, s.text));
 
   // ---------- input ----------
   function isTyping(e) {
@@ -165,7 +201,12 @@ function boot() {
   // ---------- autosave ----------
   setInterval(save, 30000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
-  window.addEventListener('beforeunload', save);
+  window.addEventListener('beforeunload', () => {
+    if (skipSave) return;
+    if (saver) saver.saveOnExit(state);
+    else saveGame(state);
+  });
+  if (saver && (!session.initialSave || session.dirty)) setTimeout(save, 3000);
 
   // ---------- help card ----------
   function helpSeen() {
@@ -254,4 +295,19 @@ function boot() {
   requestAnimationFrame(frame);
 }
 
-boot();
+async function start() {
+  if (!webglAvailable()) {
+    showFatal('ไม่สามารถเปิด WebGL ได้ — กรุณาใช้ Safari หรือ Chrome รุ่นใหม่ และเปิดใช้การเร่งความเร็วด้วยฮาร์ดแวร์');
+    return;
+  }
+  let session;
+  try {
+    session = await startSession();
+  } catch (err) {
+    console.error(err);
+    session = { mode: 'local' };
+  }
+  boot(session);
+}
+
+start();

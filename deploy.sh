@@ -12,7 +12,7 @@ npm test --silent >/dev/null 2>&1 || { echo "✖ tests failed — not deploying"
 echo "▶ uploading to $HOST:$DIR"
 ssh "$HOST" "mkdir -p $DIR /srv/hamlet/data && chown 1000:1000 /srv/hamlet/data && touch /srv/hamlet/hamlet.env"
 rsync -az --delete --exclude-from=.dockerignore \
-  index.html src vendor server Dockerfile docker-compose.yml .dockerignore "$HOST:$DIR/"
+  index.html privacy.html src vendor server Dockerfile docker-compose.yml .dockerignore "$HOST:$DIR/"
 
 echo "▶ building and restarting"
 ssh "$HOST" "cd $DIR && docker compose up -d --build && docker image prune -f >/dev/null"

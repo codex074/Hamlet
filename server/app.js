@@ -22,7 +22,7 @@ const MIME = {
 };
 // Only these parts of the repo are public.
 const PUBLIC_DIRS = ['src', 'vendor'];
-const PUBLIC_FILES = ['index.html'];
+const PUBLIC_FILES = ['index.html', 'privacy.html'];
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }

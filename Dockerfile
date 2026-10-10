@@ -1,7 +1,7 @@
 # Hamlet game server: static game files + JSON API, no npm dependencies.
 FROM node:24-alpine
 WORKDIR /app
-COPY index.html ./
+COPY index.html privacy.html ./
 COPY src ./src
 COPY vendor ./vendor
 COPY server ./server

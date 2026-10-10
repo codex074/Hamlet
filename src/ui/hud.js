@@ -412,7 +412,24 @@ export function createHUD(root, handlers = {}) {
     toast(`อัปเกรดอัตโนมัติทุกหลัง: ${on ? 'เปิด' : 'ปิด'}`);
   });
   addMenuItem('💾 บันทึกเกม', () => { call('saveGame'); toast('บันทึกเกมแล้ว'); });
-  addMenuItem('🆕 เกมใหม่', () => confirmDialog('เริ่มเกมใหม่?', 'หมู่บ้านปัจจุบันจะถูกลบและไม่สามารถกู้คืนได้', 'เกมใหม่', () => call('newGame')));
+  const cloud = !!(handlers && handlers.cloud);
+  if (cloud) {
+    // cloud villages are replaced by deleting / recreating them on the select screen
+    addMenuItem('🏘️ กลับไปเลือกหมู่บ้าน', () => call('backToSelect'));
+    addMenuItem('🚪 ออกจากระบบ', () => call('logout'));
+  } else {
+    addMenuItem('🆕 เกมใหม่', () => confirmDialog('เริ่มเกมใหม่?', 'หมู่บ้านปัจจุบันจะถูกลบและไม่สามารถกู้คืนได้', 'เกมใหม่', () => call('newGame')));
+  }
+
+  // cloud save status ("☁️ บันทึกแล้ว hh:mm" / "⚠️ บันทึกไม่สำเร็จ") under the speed buttons
+  const saveEl = el('div', 'savestatus');
+  saveEl.hidden = true;
+  root.appendChild(saveEl);
+  function setSaveStatus(kind, text) {
+    saveEl.hidden = !text;
+    setText(saveEl, text || '');
+    saveEl.dataset.kind = kind || '';
+  }
 
   menuBtn.addEventListener('click', (e) => { e.stopPropagation(); refreshMenu(); menuEl.hidden = !menuEl.hidden; });
   document.addEventListener('click', (e) => {
@@ -923,5 +940,5 @@ export function createHUD(root, handlers = {}) {
     renderInfo(state);
   }
 
-  return { update, showInfo, showVillager, toast, setActiveTool, setSpeedDisplay };
+  return { update, showInfo, showVillager, toast, setActiveTool, setSpeedDisplay, setSaveStatus };
 }
