@@ -9,13 +9,13 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 // Keyframes over sun elevation e in [-1, 1]. Each stop: [e, value]; values are lerped.
-const SKY = [[-1, 0x0b1330], [-0.25, 0x0e1838], [0, 0xf0985a], [0.5, 0x8fc4ee], [1, 0x8fc4ee]];
-const SUN_COLOR = [[-1, 0x6678b8], [-0.1, 0x6678b8], [0, 0xffa860], [0.5, 0xfff1d6], [1, 0xfff1d6]];
+const SKY = [[-1, 0x1a2648], [-0.25, 0x22305a], [0, 0xf0985a], [0.5, 0x8fc4ee], [1, 0x8fc4ee]];
+const SUN_COLOR = [[-1, 0x8fa3dc], [-0.1, 0x8fa3dc], [0, 0xffa860], [0.5, 0xfff1d6], [1, 0xfff1d6]];
 // Intensities are ~pi x the old "legacy" values: three r155+ divides diffuse light by pi.
-const SUN_INTENSITY = [[-1, 0.7], [-0.25, 0.5], [0, 1.3], [0.5, 2.3], [1, 2.5]];
-const HEMI_SKY = [[-1, 0x34467a], [-0.25, 0x34467a], [0, 0xffc8a0], [0.5, 0xcfe4ff], [1, 0xcfe4ff]];
-const HEMI_GROUND = [[-1, 0x1e2433], [-0.25, 0x1e2433], [0, 0x5a4634], [0.5, 0x6b5a40], [1, 0x6b5a40]];
-const HEMI_INTENSITY = [[-1, 0.8], [-0.25, 0.8], [0, 0.9], [0.5, 1.05], [1, 1.1]];
+const SUN_INTENSITY = [[-1, 1.1], [-0.25, 0.9], [0, 1.3], [0.5, 2.3], [1, 2.5]];
+const HEMI_SKY = [[-1, 0x6a7fb8], [-0.25, 0x6a7fb8], [0, 0xffc8a0], [0.5, 0xcfe4ff], [1, 0xcfe4ff]];
+const HEMI_GROUND = [[-1, 0x3a4256], [-0.25, 0x3a4256], [0, 0x5a4634], [0.5, 0x6b5a40], [1, 0x6b5a40]];
+const HEMI_INTENSITY = [[-1, 1.1], [-0.25, 1.0], [0, 0.9], [0.5, 1.05], [1, 1.1]];
 
 const _a = new THREE.Color();
 const _b = new THREE.Color();

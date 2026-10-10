@@ -139,6 +139,7 @@ export function createWorldView(scene, terrain) {
   }
 
   // ------------------------------------------------------------ villagers
+  const VILLAGER_SCALE = 1.35; // readable at the default zoom
   const villagerMesh = new THREE.InstancedMesh(VILLAGER_MODEL.geometry, VILLAGER_MODEL.material, VILLAGER_CAP);
   villagerMesh.count = 0;
   villagerMesh.frustumCulled = false;
@@ -189,14 +190,14 @@ export function createWorldView(scene, terrain) {
       const y = heightAt(terrain, v.x, v.z) + bob;
       _q.setFromAxisAngle(Y_AXIS, lp.yaw);
       _p.set(v.x, y, v.z);
-      _s.set(1, 1, 1);
+      _s.set(VILLAGER_SCALE, VILLAGER_SCALE, VILLAGER_SCALE);
       _m.compose(_p, _q, _s);
       villagerMesh.setMatrixAt(n, _m);
       villagerMesh.setColorAt(n, color);
       n++;
 
       if (v.carry && nc < VILLAGER_CAP) {
-        _p.set(v.x, y + 1.95, v.z);
+        _p.set(v.x, y + 1.95 * VILLAGER_SCALE, v.z);
         _m.compose(_p, _q, _s);
         carryMesh.setMatrixAt(nc, _m);
         carryMesh.setColorAt(nc, RES_COLORS[v.carry.res] || WHITE);
