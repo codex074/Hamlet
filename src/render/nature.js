@@ -1,11 +1,15 @@
-// Nature: trees / rocks / iron ore outcrops / berry bushes (resource nodes) and instanced ground detail (grass, flowers, pebbles).
+// Nature: trees / saplings / rocks / iron ore outcrops / berry bushes (resource nodes) and instanced ground detail
+// (grass, flowers, pebbles). Large-map ready: nodes live in 40 m chunks of InstancedMeshes (frustum culled, rebuilt
+// only when a chunk's contents change); ground detail is scattered per 40 m chunk (deterministic) and only
+// instantiated within ~110 m of the view target.
 // Everything is procedural, vertex-coloured, instanced and wind-swayed in the vertex shader.
 // Node-safe: no `document` and no WebGL needed at import time.
 import * as THREE from '../../vendor/three.module.js';
-import { NODE_COUNTS, NODE_AMOUNT, BUILDINGS, WORLD_SIZE, MAX_HEIGHT, SPAWN } from '../config.js';
+import * as CFG from '../config.js';
+import { NODE_AMOUNT, BUILDINGS, WORLD_SIZE, MAX_HEIGHT, DAY_LENGTH } from '../config.js';
 import { heightAt, isWater, fertilityAt } from '../terrain.js';
-import { wearAt } from '../wear.js';
 import { mulberry32, makeNoise2D } from '../rng.js';
+import { getGraphics, onGraphicsChange } from './graphics.js';
 
 // ------------------------------------------------------------------ small helpers
 
@@ -84,13 +88,38 @@ function addPart(b, geo0, m, colorFn, mode = 'geo', up = 0, faceColor = false) {
   g.dispose();
 }
 
-function finish(b) {
+// Build the BufferGeometry. Identical vertices (same position, normal and colour) are welded into an indexed
+// geometry: blobs / cones share most of their vertices, which roughly halves vertex-shader work per tree.
+// weld=false keeps the exact triangle-soup order (the berry geometry relies on it for its per-vertex attributes).
+function finish(b, weld = true) {
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3));
+  const n = b.pos.length / 3;
+  if (weld) {
+    const map = new Map();
+    const pos = []; const nor = []; const col = []; const index = new Uint32Array(n);
+    const q = (v, f) => Math.round(v * f);
+    for (let i = 0; i < n; i++) {
+      const x = b.pos[i * 3]; const y = b.pos[i * 3 + 1]; const z = b.pos[i * 3 + 2];
+      const key = `${q(x, 2000)},${q(y, 2000)},${q(z, 2000)}|${q(b.nor[i * 3], 500)},${q(b.nor[i * 3 + 1], 500)},${q(b.nor[i * 3 + 2], 500)}|${q(b.col[i * 3], 250)},${q(b.col[i * 3 + 1], 250)},${q(b.col[i * 3 + 2], 250)}`;
+      let id = map.get(key);
+      if (id === undefined) {
+        id = pos.length / 3;
+        map.set(key, id);
+        pos.push(x, y, z); nor.push(b.nor[i * 3], b.nor[i * 3 + 1], b.nor[i * 3 + 2]); col.push(b.col[i * 3], b.col[i * 3 + 1], b.col[i * 3 + 2]);
+      }
+      index[i] = id;
+    }
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(new THREE.BufferAttribute(pos.length / 3 > 65535 ? index : new Uint16Array(index), 1));
+  } else {
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3));
+  }
   geo.computeBoundingSphere();
-  geo.userData.triangles = b.pos.length / 9;
+  geo.userData.triangles = n / 3;
   return geo;
 }
 
@@ -415,7 +444,7 @@ function berryGeometry() {
     const n = b.pos.length / 3 - before;
     for (let k = 0; k < n; k++) { centers.push(bb.x, bb.y, bb.z); ranks.push(bb.rank); }
   });
-  const geo = finish(b);
+  const geo = finish(b, false);
   geo.setAttribute('aCenter', new THREE.Float32BufferAttribute(centers, 3));
   geo.setAttribute('aIndex', new THREE.Float32BufferAttribute(ranks, 1));
   return geo;
@@ -472,63 +501,67 @@ ${berries ? `{
   return mat;
 }
 
+// ------------------------------------------------------------------ sapling model
+
+// A young tree: thin leaning trunk, a loose cluster of fresh light-green blobs and a tie-stake. Authored at
+// its fully grown size (~3 m); the instance scale carries the growth stage.
+function saplingGeometry() {
+  const b = createBuilder();
+  addTrunk(b, { h: 1.5, r0: 0.07, r1: 0.04, radial: 5, seed: 6, lean: [0.1, 0.05] });
+  const top = C(0xb3dc62);
+  addBlob(b, 0.1, 2.05, 0.04, 0.72, { detail: 1, base: C(0x4f9a38), top, seed: 41, sy: 1.1, amp: 0.15 });
+  addBlob(b, 0.5, 1.62, 0.12, 0.4, { detail: 0, base: C(0x5aa63d), top, seed: 42, amp: 0.2 });
+  addBlob(b, -0.38, 1.55, -0.16, 0.42, { detail: 0, base: C(0x4a9238), top, seed: 43, amp: 0.2 });
+  addBlob(b, 0.08, 2.62, 0.0, 0.36, { detail: 0, base: C(0x62b043), top: C(0xc8e676), seed: 44, amp: 0.2 });
+  // stake with a loop of twine
+  const stake = new THREE.CylinderGeometry(0.025, 0.03, 1.35, 5, 1, true);
+  stake.translate(0, 0.675, 0);
+  addPart(b, stake, compose(0.26, 0, 0.2), (x, y, z) => { tmpCol.set(0xa98a5a).multiplyScalar(0.85 + 0.2 * hash3(x * 9, y * 5, z * 9, 3)); return tmpCol; });
+  const twine = new THREE.TorusGeometry(0.13, 0.012, 3, 6);
+  addPart(b, twine, compose(0.14, 0.95, 0.1, 1, 1, 1, 0, Math.PI / 2), () => tmpCol.set(0xd9c79a));
+  return finish(b);
+}
+
 // ------------------------------------------------------------------ nodes view
 
 const NODE_REFRESH = 0.5;
+const NODE_CHUNK = 40;          // metres per instancing chunk (frustum culled)
 const BERRY_MAX = NODE_AMOUNT.berry;
+const SLOT_TREE = 0;            // 0..3 tree variants
+const SLOT_ROCK = 4;            // 4..6
+const SLOT_ORE = 7;             // 7..8
+const SLOT_BUSH = 9;
+const SLOT_BERRY = 10;
+const SLOT_COUNT = 11;
 
 export function createNodesView(parent, terrain) {
+  const SIZE = terrain.size || WORLD_SIZE;
+  const nc = Math.max(1, Math.ceil(SIZE / NODE_CHUNK));
   const root = new THREE.Group();
   root.name = 'nature-nodes';
   parent.add(root);
 
-  const treeCap = Math.ceil(NODE_COUNTS.tree * 1.3) + 32;
-  const rockCap = Math.ceil(NODE_COUNTS.rock * 1.3) + 32;
-  const berryCap = Math.ceil(NODE_COUNTS.berry * 1.3) + 32;
-  const oreCap = Math.ceil((NODE_COUNTS.ore || 14) * 1.3) + 16;
-
   const treeMat = makeVegMaterial({ amp: 0.12, height: 5.2 });
   const bushMat = makeVegMaterial({ amp: 0.05, height: 1.0 });
   const berryMat = makeVegMaterial({ amp: 0.05, height: 1.0, berries: true });
+  const saplingMat = makeVegMaterial({ amp: 0.1, height: 2.6 });
   const rockMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
 
   const geometries = [];
-  function mk(name, geo, mat, cap, { cast = true, receive = true } = {}) {
-    geometries.push(geo);
-    const mesh = new THREE.InstancedMesh(geo, mat, cap);
-    mesh.count = 0;
-    mesh.frustumCulled = false;
-    mesh.castShadow = cast;
-    mesh.receiveShadow = receive;
-    mesh.name = name;
-    root.add(mesh);
-    return mesh;
-  }
-
-  const treeMeshes = [
-    mk('trees-pine', pineA(), treeMat, treeCap),
-    mk('trees-fir', pineB(), treeMat, treeCap),
-    mk('trees-oak', oak(), treeMat, treeCap),
-    mk('trees-birch', birch(), treeMat, treeCap),
-  ];
-  const rockMeshes = [
-    mk('rocks-a', rockA(), rockMat, rockCap),
-    mk('rocks-b', rockB(), rockMat, rockCap),
-    mk('rocks-c', rockC(), rockMat, rockCap),
-  ];
-  const oreMeshes = [
-    mk('ore-a', oreA(), rockMat, oreCap),
-    mk('ore-b', oreB(), rockMat, oreCap),
-  ];
-  const bushMesh = mk('bushes', bushGeometry(), bushMat, berryCap);
-  const berryGeo = berryGeometry();
-  const fillAttr = new THREE.InstancedBufferAttribute(new Float32Array(berryCap), 1);
-  fillAttr.setUsage(THREE.DynamicDrawUsage);
-  berryGeo.setAttribute('aFill', fillAttr);
-  const berryMesh = mk('berries', berryGeo, berryMat, berryCap, { cast: false, receive: false });
+  const slotGeo = [pineA(), pineB(), oak(), birch(), rockA(), rockB(), rockC(), oreA(), oreB(), bushGeometry(), berryGeometry()];
+  geometries.push(...slotGeo);
+  const slotMat = [treeMat, treeMat, treeMat, treeMat, rockMat, rockMat, rockMat, rockMat, rockMat, bushMat, berryMat];
+  const slotName = ['trees-pine', 'trees-fir', 'trees-oak', 'trees-birch', 'rocks-a', 'rocks-b', 'rocks-c', 'ore-a', 'ore-b', 'bushes', 'berries'];
+  const slotShadow = [true, true, true, true, true, true, true, true, true, true, false];
 
   const biome = makeNoise2D(2024);
-  const mats = [treeMat, bushMat, berryMat];
+  const mats = [treeMat, bushMat, berryMat, saplingMat];
+
+  const chunks = new Array(nc * nc).fill(null);   // { meshes: [InstancedMesh|null] * SLOT_COUNT }
+  const lastSig = new Float64Array(nc * nc).fill(-1);
+  const lastCnt = new Int32Array(nc * nc).fill(-1);
+  const sig = new Float64Array(nc * nc);
+  const cnt = new Int32Array(nc * nc);
 
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -536,6 +569,7 @@ export function createNodesView(parent, terrain) {
   const pv = new THREE.Vector3();
   const sv = new THREE.Vector3();
   const color = new THREE.Color();
+  const up = new THREE.Vector3(0, 1, 0);
 
   function pickTreeVariant(n, h) {
     const lowN = biome(n.x * 0.03, n.z * 0.03);
@@ -544,20 +578,80 @@ export function createNodesView(parent, terrain) {
     return rnd(n.id, 9) < 0.58 ? 2 : 3;
   }
 
-  function refresh(nodes) {
-    const tc = [0, 0, 0, 0];
-    const rc = [0, 0, 0];
-    const oc = [0, 0];
-    let bc = 0;
-    for (const n of nodes) {
+  // Berry meshes need their own aFill attribute, so each gets a light geometry that shares the vertex buffers.
+  function berryGeometryFor(cap) {
+    const src = slotGeo[SLOT_BERRY];
+    const g = new THREE.BufferGeometry();
+    for (const name of Object.keys(src.attributes)) g.setAttribute(name, src.attributes[name]);
+    const fill = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+    fill.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('aFill', fill);
+    g.boundingSphere = src.boundingSphere ? src.boundingSphere.clone() : null;
+    return g;
+  }
+
+  function ensureMesh(chunk, slot, need) {
+    let m = chunk.meshes[slot];
+    if (m && need <= m.instanceMatrix.count) return m;
+    if (m) {
+      root.remove(m);
+      m.dispose();
+      if (slot === SLOT_BERRY) m.geometry.dispose();
+    }
+    const cap = Math.max(8, Math.ceil(need * 1.5));
+    const geo = slot === SLOT_BERRY ? berryGeometryFor(cap) : slotGeo[slot];
+    m = new THREE.InstancedMesh(geo, slotMat[slot], cap);
+    m.count = 0;
+    m.frustumCulled = true;       // per-chunk bounding sphere is set on every rebuild
+    m.castShadow = slotShadow[slot];
+    m.receiveShadow = slot !== SLOT_BERRY;
+    m.name = slotName[slot];
+    root.add(m);
+    chunk.meshes[slot] = m;
+    return m;
+  }
+
+  const lists = new Map();   // dirty chunk index -> node array (reused per refresh)
+  const slotOf = [];
+  const hOf = [];
+  const slotCount = new Int32Array(SLOT_COUNT);
+  const slotFill = new Int32Array(SLOT_COUNT);
+
+  function rebuildChunk(ci, list) {
+    let chunk = chunks[ci];
+    if (!chunk) chunk = chunks[ci] = { meshes: new Array(SLOT_COUNT).fill(null) };
+    slotCount.fill(0);
+    slotFill.fill(0);
+    let minX = Infinity; let maxX = -Infinity; let minZ = Infinity; let maxZ = -Infinity; let minY = Infinity; let maxY = -Infinity;
+    for (let k = 0; k < list.length; k++) {
+      const n = list[k];
       const h = heightAt(terrain, n.x, n.z);
+      hOf[k] = h;
+      let slot;
+      if (n.kind === 'tree') slot = SLOT_TREE + pickTreeVariant(n, h);
+      else if (n.kind === 'rock') slot = SLOT_ROCK + (Math.floor(rnd(n.id, 10) * 3) % 3);
+      else if (n.kind === 'ore') slot = SLOT_ORE + (Math.floor(rnd(n.id, 10) * 2) % 2);
+      else if (n.kind === 'berry') slot = SLOT_BUSH;
+      else slot = -1;
+      slotOf[k] = slot;
+      if (slot < 0) continue;
+      slotCount[slot]++;
+      if (slot === SLOT_BUSH) slotCount[SLOT_BERRY]++;
+      if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+      if (n.z < minZ) minZ = n.z; if (n.z > maxZ) maxZ = n.z;
+      if (h < minY) minY = h; if (h > maxY) maxY = h;
+    }
+    for (let s = 0; s < SLOT_COUNT; s++) if (slotCount[s] > 0) ensureMesh(chunk, s, slotCount[s]);
+
+    for (let k = 0; k < list.length; k++) {
+      const n = list[k];
+      const slot = slotOf[k];
+      if (slot < 0) continue;
+      const h = hOf[k];
       const yaw = rnd(n.id, 2) * Math.PI * 2;
       if (n.kind === 'tree') {
-        const v = pickTreeVariant(n, h);
-        const mesh = treeMeshes[v];
-        const i = tc[v];
-        if (i >= treeCap) continue;
-        tc[v]++;
+        const mesh = chunk.meshes[slot];
+        const i = slotFill[slot]++;
         const s = 0.82 + rnd(n.id, 1) * 0.5;
         eu.set((rnd(n.id, 11) - 0.5) * 0.07, yaw, (rnd(n.id, 12) - 0.5) * 0.07);
         q.setFromEuler(eu);
@@ -567,16 +661,13 @@ export function createNodesView(parent, terrain) {
         mesh.setMatrixAt(i, m4);
         const tone = 0.88 + rnd(n.id, 4) * 0.24;
         color.setRGB(tone * (0.94 + rnd(n.id, 5) * 0.12), tone, tone * (0.88 + rnd(n.id, 6) * 0.2));
-        if (v >= 2 && rnd(n.id, 15) < 0.12) color.multiply(tmpCol.setRGB(1.28, 1.02, 0.62)); // a few autumn-leaning trees
+        if (slot >= 2 && rnd(n.id, 15) < 0.12) color.multiply(tmpCol.setRGB(1.28, 1.02, 0.62)); // a few autumn-leaning trees
         mesh.setColorAt(i, color);
       } else if (n.kind === 'rock') {
-        const v = Math.floor(rnd(n.id, 10) * 3) % 3;
-        const mesh = rockMeshes[v];
-        const i = rc[v];
-        if (i >= rockCap) continue;
-        rc[v]++;
+        const mesh = chunk.meshes[slot];
+        const i = slotFill[slot]++;
         const s = (0.75 + rnd(n.id, 1) * 0.6) * (0.6 + 0.4 * Math.min(1, n.amount / NODE_AMOUNT.rock));
-        q.setFromAxisAngle(pv.set(0, 1, 0), yaw);
+        q.setFromAxisAngle(up, yaw);
         pv.set(n.x, h - 0.1, n.z);
         sv.set(s, s * (0.85 + rnd(n.id, 3) * 0.3), s);
         m4.compose(pv, q, sv);
@@ -584,13 +675,10 @@ export function createNodesView(parent, terrain) {
         const t = 0.9 + rnd(n.id, 4) * 0.2;
         mesh.setColorAt(i, color.setRGB(t, t * 0.99, t * 0.96));
       } else if (n.kind === 'ore') {
-        const v = Math.floor(rnd(n.id, 10) * 2) % 2;
-        const mesh = oreMeshes[v];
-        const i = oc[v];
-        if (i >= oreCap) continue;
-        oc[v]++;
+        const mesh = chunk.meshes[slot];
+        const i = slotFill[slot]++;
         const s = (0.85 + rnd(n.id, 1) * 0.45) * (0.6 + 0.4 * Math.min(1, n.amount / NODE_AMOUNT.ore));
-        q.setFromAxisAngle(pv.set(0, 1, 0), yaw);
+        q.setFromAxisAngle(up, yaw);
         pv.set(n.x, h - 0.1, n.z);
         sv.set(s, s * (0.85 + rnd(n.id, 3) * 0.3), s);
         m4.compose(pv, q, sv);
@@ -598,43 +686,126 @@ export function createNodesView(parent, terrain) {
         const t = 0.92 + rnd(n.id, 4) * 0.16;
         mesh.setColorAt(i, color.setRGB(t, t, t));
       } else if (n.kind === 'berry') {
-        if (bc >= berryCap) continue;
+        const bushMesh = chunk.meshes[SLOT_BUSH];
+        const berryMesh = chunk.meshes[SLOT_BERRY];
+        const i = slotFill[SLOT_BUSH]++;
         const ratio = clamp(n.amount / BERRY_MAX);
         const s = (0.95 + rnd(n.id, 1) * 0.35) * (0.88 + 0.22 * ratio);
-        q.setFromAxisAngle(pv.set(0, 1, 0), yaw);
+        q.setFromAxisAngle(up, yaw);
         pv.set(n.x, h - 0.05, n.z);
         sv.set(s, s, s);
         m4.compose(pv, q, sv);
-        bushMesh.setMatrixAt(bc, m4);
-        berryMesh.setMatrixAt(bc, m4);
+        bushMesh.setMatrixAt(i, m4);
+        berryMesh.setMatrixAt(i, m4);
         const t = 0.9 + rnd(n.id, 4) * 0.2;
-        bushMesh.setColorAt(bc, color.setRGB(t * (0.95 + rnd(n.id, 5) * 0.1), t, t * 0.95));
+        bushMesh.setColorAt(i, color.setRGB(t * (0.95 + rnd(n.id, 5) * 0.1), t, t * 0.95));
         // red bushes keep the vertex colours, a share turn deep purple
-        if (rnd(n.id, 16) < 0.4) berryMesh.setColorAt(bc, color.setRGB(0.55, 0.8, 2.3));
-        else berryMesh.setColorAt(bc, color.setRGB(1, 1, 1));
-        fillAttr.array[bc] = n.amount > 0.05 ? 0.1 + 0.9 * ratio : 0;
-        bc++;
+        if (rnd(n.id, 16) < 0.4) berryMesh.setColorAt(i, color.setRGB(0.55, 0.8, 2.3));
+        else berryMesh.setColorAt(i, color.setRGB(1, 1, 1));
+        berryMesh.geometry.attributes.aFill.array[i] = n.amount > 0.05 ? 0.1 + 0.9 * ratio : 0;
       }
     }
-    treeMeshes.forEach((m, i) => { m.count = tc[i]; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
-    rockMeshes.forEach((m, i) => { m.count = rc[i]; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
-    oreMeshes.forEach((m, i) => { m.count = oc[i]; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
-    for (const m of [bushMesh, berryMesh]) {
-      m.count = bc;
+
+    const hasAny = Number.isFinite(minX);
+    const cxm = hasAny ? (minX + maxX) / 2 : 0;
+    const czm = hasAny ? (minZ + maxZ) / 2 : 0;
+    const cym = hasAny ? (minY + maxY) / 2 + 3 : 0;
+    const rad = hasAny ? Math.hypot((maxX - minX) / 2, (maxZ - minZ) / 2, (maxY - minY) / 2 + 4) + 5 : 1;
+    for (let s = 0; s < SLOT_COUNT; s++) {
+      const m = chunk.meshes[s];
+      if (!m) continue;
+      const c = slotCount[s];
+      m.count = c;
       m.instanceMatrix.needsUpdate = true;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      if (s === SLOT_BERRY) m.geometry.attributes.aFill.needsUpdate = true;
+      if (!m.boundingSphere) m.boundingSphere = new THREE.Sphere();
+      m.boundingSphere.center.set(cxm, cym, czm);
+      m.boundingSphere.radius = rad;
+      m.visible = c > 0;
     }
-    fillAttr.needsUpdate = true;
+  }
+
+  // ---- saplings: one small global InstancedMesh; scale follows (time - planted) / grow time
+  let saplingMesh = null;
+  let saplingCap = 0;
+  const saplingGeo = saplingGeometry();
+  geometries.push(saplingGeo);
+  const saplings = [];
+  const GROW_SECONDS = (CFG.SAPLING_GROW_DAYS ?? 2) * DAY_LENGTH;
+
+  function refreshSaplings(time) {
+    const n = saplings.length;
+    if (n > saplingCap || (!saplingMesh && n > 0)) {
+      if (saplingMesh) { root.remove(saplingMesh); saplingMesh.dispose(); }
+      saplingCap = Math.ceil(n * 1.5) + 32;
+      saplingMesh = new THREE.InstancedMesh(saplingGeo, saplingMat, saplingCap);
+      saplingMesh.frustumCulled = false;
+      saplingMesh.castShadow = true;
+      saplingMesh.receiveShadow = true;
+      saplingMesh.name = 'saplings';
+      root.add(saplingMesh);
+    }
+    if (!saplingMesh) return;
+    for (let i = 0; i < n; i++) {
+      const nd = saplings[i];
+      const p = clamp((time - (nd.planted || 0)) / GROW_SECONDS);
+      const s = (0.2 + 0.85 * (p * (2 - p))) * (0.92 + rnd(nd.id, 1) * 0.16);   // ease-out growth
+      const h = heightAt(terrain, nd.x, nd.z);
+      eu.set((rnd(nd.id, 11) - 0.5) * 0.08, rnd(nd.id, 2) * Math.PI * 2, (rnd(nd.id, 12) - 0.5) * 0.08);
+      q.setFromEuler(eu);
+      pv.set(nd.x, h - 0.05, nd.z);
+      sv.set(s, s, s);
+      m4.compose(pv, q, sv);
+      saplingMesh.setMatrixAt(i, m4);
+      const t = 1.05 - 0.2 * p + rnd(nd.id, 4) * 0.1;   // fresher green while young
+      saplingMesh.setColorAt(i, color.setRGB(t, t * 1.02, t * 0.9));
+    }
+    saplingMesh.count = n;
+    saplingMesh.instanceMatrix.needsUpdate = true;
+    if (saplingMesh.instanceColor) saplingMesh.instanceColor.needsUpdate = true;
   }
 
   let timer = NODE_REFRESH;
   let time = 0;
-  let lastSig = NaN;
+  let lastSaplingSig = -1;
 
-  function signature(nodes) {
-    let s = nodes.length;
-    for (const n of nodes) s = (s * 31 + n.id * 7 + Math.round(n.amount * 8) + (n.kind === 'tree' ? 1 : n.kind === 'rock' ? 2 : n.kind === 'ore' ? 4 : 3)) % 1000000007;
-    return s;
+  const cidx = (v) => Math.min(nc - 1, Math.max(0, Math.floor(v / NODE_CHUNK)));
+
+  function refresh(state) {
+    const nodes = state.nodes;
+    sig.fill(0);
+    cnt.fill(0);
+    saplings.length = 0;
+    for (let k = 0; k < nodes.length; k++) {
+      const n = nodes[k];
+      if (n.kind === 'sapling') { saplings.push(n); continue; }
+      const ci = cidx(n.z) * nc + cidx(n.x);
+      sig[ci] = (sig[ci] * 31 + n.id * 7 + Math.round(n.amount * 8) + (n.kind === 'tree' ? 1 : n.kind === 'rock' ? 2 : n.kind === 'ore' ? 4 : 3)) % 1000000007;
+      cnt[ci]++;
+    }
+    let dirty = 0;
+    lists.clear();
+    for (let ci = 0; ci < nc * nc; ci++) {
+      if (sig[ci] !== lastSig[ci] || cnt[ci] !== lastCnt[ci]) {
+        if (cnt[ci] === 0 && lastCnt[ci] <= 0 && !chunks[ci]) { lastSig[ci] = sig[ci]; lastCnt[ci] = cnt[ci]; continue; }
+        lists.set(ci, []);
+        dirty++;
+      }
+    }
+    if (dirty) {
+      for (let k = 0; k < nodes.length; k++) {
+        const n = nodes[k];
+        if (n.kind === 'sapling') continue;
+        const l = lists.get(cidx(n.z) * nc + cidx(n.x));
+        if (l) l.push(n);
+      }
+      for (const [ci, list] of lists) {
+        rebuildChunk(ci, list);
+        lastSig[ci] = sig[ci];
+        lastCnt[ci] = cnt[ci];
+      }
+    }
   }
 
   function update(state, dt = 0) {
@@ -643,14 +814,18 @@ export function createNodesView(parent, terrain) {
     timer += dt;
     if (timer < NODE_REFRESH) return;
     timer = 0;
-    const sig = signature(state.nodes);
-    if (sig === lastSig) return;
-    lastSig = sig;
-    refresh(state.nodes);
+    refresh(state);
+    refreshSaplings(state.time || 0);
+    lastSaplingSig = saplings.length;
   }
+  void lastSaplingSig;
 
   function dispose() {
-    for (const m of [...treeMeshes, ...rockMeshes, ...oreMeshes, bushMesh, berryMesh]) { root.remove(m); m.dispose(); }
+    for (const c of chunks) {
+      if (!c) continue;
+      for (const m of c.meshes) { if (!m) continue; root.remove(m); m.dispose(); if (m.geometry.attributes.aFill) m.geometry.dispose(); }
+    }
+    if (saplingMesh) { root.remove(saplingMesh); saplingMesh.dispose(); }
     geometries.forEach((g) => g.dispose());
     mats.forEach((m) => m.dispose());
     rockMat.dispose();
@@ -662,10 +837,10 @@ export function createNodesView(parent, terrain) {
 
 // ------------------------------------------------------------------ ground detail
 
-const TUFT_N = 8000;
-const FLOWER_N = 1500;
-const PEBBLE_N = 600;
 const DETAIL_REFRESH = 2;
+const GD_CHUNK = 40;            // scatter chunk size (metres); each chunk is generated deterministically from its index
+const GD_MOVE = 6;              // rebuild the live instance set after the focus moved this far
+const GD_GEN_BUDGET_MS = 6;     // chunk generation budget per update (the first update is unbudgeted)
 
 function tuftGeometry() {
   const b = createBuilder();
@@ -674,7 +849,7 @@ function tuftGeometry() {
   const colBase = C(0x2f5e24);
   const colMid = C(0x62a038);
   const colTip = C(0xa3cf56);
-  const up = new THREE.Vector3(0, 1, 0);
+  const upv = new THREE.Vector3(0, 1, 0);
   const verts = [];
   for (let k = 0; k < blades; k++) {
     const a = (k / blades) * Math.PI * 2 + rand() * 0.8;
@@ -701,7 +876,7 @@ function tuftGeometry() {
       if (t < 0.5) col.copy(colBase).lerp(colMid, t * 2);
       else col.copy(colMid).lerp(colTip, (t - 0.5) * 2);
       b.pos.push(v[0], v[1], v[2]);
-      b.nor.push(up.x, up.y, up.z);
+      b.nor.push(upv.x, upv.y, upv.z);
       b.col.push(col.r, col.g, col.b);
     }
   }
@@ -710,10 +885,10 @@ function tuftGeometry() {
 
 function flowerGeometry(petal, centre) {
   const b = createBuilder();
-  const up = [0, 1, 0];
+  const upn = [0, 1, 0];
   const stem = C(0x4f8a35);
   const stemTop = C(0x6aa840);
-  const push = (x, y, z, c) => { b.pos.push(x, y, z); b.nor.push(up[0], up[1], up[2]); b.col.push(c.r, c.g, c.b); };
+  const push = (x, y, z, c) => { b.pos.push(x, y, z); b.nor.push(upn[0], upn[1], upn[2]); b.col.push(c.r, c.g, c.b); };
   const h = 0.3;
   const w = 0.012;
   const tilt = 0.05;
@@ -750,11 +925,12 @@ function pebbleGeometry() {
 }
 
 export function createGroundDetail(parent, terrain) {
+  const SIZE = terrain.size || WORLD_SIZE;
+  const nc = Math.max(1, Math.ceil(SIZE / GD_CHUNK));
   const root = new THREE.Group();
   root.name = 'nature-ground-detail';
   parent.add(root);
 
-  const rand = mulberry32(90210);
   const clump = makeNoise2D(311);
   const patchN = makeNoise2D(412);
 
@@ -765,26 +941,13 @@ export function createGroundDetail(parent, terrain) {
     return Math.hypot(dx, dz) * 0.5;
   };
   const lo = 3;
-  const hi = WORLD_SIZE - 3;
+  const hi = SIZE - 3;
   function landAt(x, z, minH = 0.12, maxSlope = 0.75) {
     if (isWater(terrain, x, z)) return null;
     const h = heightAt(terrain, x, z);
     if (h < minH) return null;
     if (slopeAt(x, z) > maxSlope) return null;
     return h;
-  }
-
-  const items = []; // { mesh, base: Float32Array, hidden: Uint8Array, x:[], z:[] }
-
-  function makeSet(name, geo, mat, n, { receive = true } = {}) {
-    const mesh = new THREE.InstancedMesh(geo, mat, n);
-    mesh.count = 0;
-    mesh.frustumCulled = false;
-    mesh.castShadow = false;
-    mesh.receiveShadow = receive;
-    mesh.name = name;
-    root.add(mesh);
-    return { mesh, n: 0, cap: n, x: new Float32Array(n), z: new Float32Array(n), hidden: new Uint8Array(n), base: new Float32Array(n * 16) };
   }
 
   const tuftMat = makeVegMaterial({ amp: 0.14, height: 0.7, noFlip: true, doubleSide: true });
@@ -800,9 +963,25 @@ export function createGroundDetail(parent, terrain) {
   const flowerGeos = flowerSpecs.map(([, p, c]) => flowerGeometry(p, c));
   const pebbleGeo = pebbleGeometry();
 
-  const tufts = makeSet('grass-tufts', tuftGeo, tuftMat, TUFT_N);
-  const flowerSets = flowerSpecs.map(([name], i) => makeSet(name, flowerGeos[i], flowerMat, Math.ceil(FLOWER_N * 0.6)));
-  const pebbles = makeSet('pebbles', pebbleGeo, pebbleMat, PEBBLE_N);
+  // layers: instances within [near, far] of the focus; density fades out between them (each instance has a rank)
+  const layers = [
+    { name: 'grass-tufts', geo: tuftGeo, mat: tuftMat, cap: 9000, near: 35, far: 110, grass: true },
+    ...flowerSpecs.map(([name], i) => ({ name, geo: flowerGeos[i], mat: flowerMat, cap: 1600, near: 25, far: 80, grass: true })),
+    { name: 'pebbles', geo: pebbleGeo, mat: pebbleMat, cap: 900, near: 30, far: 90, grass: false },
+  ];
+  for (const L of layers) {
+    L.mesh = new THREE.InstancedMesh(L.geo, L.mat, L.cap);
+    L.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(L.cap * 3), 3);
+    L.mesh.count = 0;
+    L.mesh.frustumCulled = false;
+    L.mesh.castShadow = false;
+    L.mesh.receiveShadow = true;
+    L.mesh.name = L.name;
+    root.add(L.mesh);
+  }
+
+  // ---- deterministic per-chunk scatter ------------------------------------------------------
+  const chunkData = new Map();   // index -> [ {n, mat, col, x, z, rank} per layer ]
 
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -811,118 +990,130 @@ export function createGroundDetail(parent, terrain) {
   const sv = new THREE.Vector3();
   const color = new THREE.Color();
 
-  function put(set, x, z, h, scale, yaw, tilt = 0.12) {
+  function newSet(max) {
+    return { n: 0, mat: new Float32Array(max * 16), col: new Float32Array(max * 3), x: new Float32Array(max), z: new Float32Array(max), rank: new Float32Array(max) };
+  }
+  function putTo(set, rand, x, z, h, scale, yaw, tilt, c) {
     const i = set.n++;
     eu.set((rand() - 0.5) * tilt, yaw, (rand() - 0.5) * tilt);
     q.setFromEuler(eu);
     pv.set(x, h - 0.02, z);
     sv.set(scale * (0.85 + rand() * 0.3), scale, scale * (0.85 + rand() * 0.3));
     m4.compose(pv, q, sv);
-    set.mesh.setMatrixAt(i, m4);
-    set.x[i] = x;
-    set.z[i] = z;
-    m4.toArray(set.base, i * 16);
-    return i;
+    m4.toArray(set.mat, i * 16);
+    set.col[i * 3] = c.r; set.col[i * 3 + 1] = c.g; set.col[i * 3 + 2] = c.b;
+    set.x[i] = x; set.z[i] = z;
+    set.rank[i] = rand();
   }
 
-  // ---- grass tufts: clumped, denser on fertile ground; ~60% of them around the starting area where the
-  // village is built, the rest spread over the map
-  const TUFT_NEAR = Math.floor(TUFT_N * 0.6);
-  let guard = 0;
-  while (tufts.n < TUFT_N && guard++ < TUFT_N * 60) {
-    const near = tufts.n < TUFT_NEAR;
-    let x; let z;
-    if (near) {
-      const a = rand() * Math.PI * 2;
-      const r = 62 * Math.sqrt(rand());
-      x = SPAWN.x + Math.cos(a) * r;
-      z = SPAWN.z + Math.sin(a) * r;
-    } else {
-      x = lo + rand() * (hi - lo);
-      z = lo + rand() * (hi - lo);
+  const TUFTS_PER_CHUNK = 460;
+  const FLOWERS_PER_CHUNK = 34;
+  const PEBBLES_PER_CHUNK = 7;
+
+  function genChunk(cx, cz) {
+    const rand = mulberry32((((cx + 1) * 73856093) ^ ((cz + 1) * 19349663) ^ 90210) >>> 0);
+    const x0 = Math.max(lo, cx * GD_CHUNK);
+    const x1 = Math.min(hi, (cx + 1) * GD_CHUNK);
+    const z0 = Math.max(lo, cz * GD_CHUNK);
+    const z1 = Math.min(hi, (cz + 1) * GD_CHUNK);
+    const out = layers.map((L, i) => newSet(i === 0 ? TUFTS_PER_CHUNK : i <= 3 ? FLOWERS_PER_CHUNK : PEBBLES_PER_CHUNK));
+    if (x1 <= x0 || z1 <= z0) return out;
+    const rx = () => x0 + rand() * (x1 - x0);
+    const rz = () => z0 + rand() * (z1 - z0);
+
+    // grass tufts: clumped, denser on fertile ground
+    const tufts = out[0];
+    let guard = 0;
+    while (tufts.n < TUFTS_PER_CHUNK && guard++ < TUFTS_PER_CHUNK * 5) {
+      const x = rx(); const z = rz();
+      const h = landAt(x, z);
+      if (h === null) continue;
+      const f = clamp((fertilityAt(terrain, x, z) - 0.3) / 0.4);
+      const cl = smooth(0.35, 0.6, clump(x * 0.11, z * 0.11)) * 0.8 + 0.2;
+      const bank = smooth(0.1, 0.9, h);
+      if (rand() > (0.55 + 0.45 * f) * cl * bank) continue;
+      const dry = 1 - f;
+      color.setRGB(
+        (0.88 + dry * 0.28) * (0.9 + rand() * 0.2),
+        (0.98 + f * 0.05) * (0.9 + rand() * 0.2),
+        (0.62 + f * 0.3) * (0.9 + rand() * 0.2),
+      );
+      putTo(tufts, rand, x, z, h, 0.65 + rand() * 0.6 + f * 0.2, rand() * Math.PI * 2, 0.25, color);
     }
-    if (x < lo || z < lo || x > hi || z > hi) continue;
-    const h = landAt(x, z);
-    if (h === null) continue;
-    const f = clamp((fertilityAt(terrain, x, z) - 0.3) / 0.4);
-    const cl = smooth(0.35, 0.6, clump(x * 0.11, z * 0.11)) * 0.8 + 0.2;
-    const bank = smooth(0.1, 0.9, h);
-    if (rand() > (0.55 + 0.45 * f) * cl * bank) continue;
-    const i = put(tufts, x, z, h, 0.65 + rand() * 0.6 + f * 0.2, rand() * Math.PI * 2, 0.25);
-    // tint matches the terrain's dry -> lush range
-    const dry = 1 - f;
-    color.setRGB(
-      (0.88 + dry * 0.28) * (0.9 + rand() * 0.2),
-      (0.98 + f * 0.05) * (0.9 + rand() * 0.2),
-      (0.62 + f * 0.3) * (0.9 + rand() * 0.2),
-    );
-    tufts.mesh.setColorAt(i, color);
-  }
 
-  // ---- flowers: meadow patches of one colour, plus the odd stray
-  const patches = [];
-  guard = 0;
-  while (patches.length < 70 && guard++ < 4000) {
-    const x = lo + rand() * (hi - lo);
-    const z = lo + rand() * (hi - lo);
-    if (landAt(x, z, 0.5, 0.5) === null) continue;
-    if (patchN(x * 0.05, z * 0.05) < 0.4) continue;
-    patches.push({ x, z, kind: Math.floor(rand() * 3), r: 1.4 + rand() * 2.2 });
-  }
-  guard = 0;
-  let placedFlowers = 0;
-  while (placedFlowers < FLOWER_N && guard++ < FLOWER_N * 30 && patches.length) {
-    let x; let z; let kind;
-    if (rand() < 0.85) {
-      const p = patches[Math.floor(rand() * patches.length)];
-      const a = rand() * Math.PI * 2;
-      const rr = Math.sqrt(rand()) * p.r;
-      x = p.x + Math.cos(a) * rr;
-      z = p.z + Math.sin(a) * rr;
-      kind = rand() < 0.85 ? p.kind : Math.floor(rand() * 3);
-    } else {
-      x = lo + rand() * (hi - lo);
-      z = lo + rand() * (hi - lo);
-      kind = Math.floor(rand() * 3);
+    // flowers: meadow patches of one colour, plus the odd stray
+    const patches = [];
+    guard = 0;
+    while (patches.length < 2 && guard++ < 40) {
+      const x = rx(); const z = rz();
+      if (patchN(x * 0.05, z * 0.05) < 0.4) continue;
+      if (landAt(x, z, 0.5, 0.5) === null) continue;
+      patches.push({ x, z, kind: Math.floor(rand() * 3), r: 1.6 + rand() * 2.4 });
     }
-    const h = landAt(x, z, 0.5, 0.5);
-    if (h === null) continue;
-    const set = flowerSets[kind];
-    if (set.n >= set.cap) continue;
-    const i = put(set, x, z, h, 0.8 + rand() * 0.6, rand() * Math.PI * 2, 0.3);
-    const t = 0.92 + rand() * 0.16;
-    set.mesh.setColorAt(i, color.setRGB(t, t, t));
-    placedFlowers++;
+    guard = 0;
+    let placed = 0;
+    while (placed < FLOWERS_PER_CHUNK && guard++ < FLOWERS_PER_CHUNK * 8 && patches.length) {
+      let x; let z; let kind;
+      if (rand() < 0.85) {
+        const p = patches[Math.floor(rand() * patches.length)];
+        const a = rand() * Math.PI * 2;
+        const rr = Math.sqrt(rand()) * p.r;
+        x = p.x + Math.cos(a) * rr;
+        z = p.z + Math.sin(a) * rr;
+        kind = rand() < 0.85 ? p.kind : Math.floor(rand() * 3);
+      } else {
+        x = rx(); z = rz();
+        kind = Math.floor(rand() * 3);
+      }
+      if (x < lo || z < lo || x > hi || z > hi) continue;
+      const h = landAt(x, z, 0.5, 0.5);
+      if (h === null) continue;
+      const set = out[1 + kind];
+      if (set.n >= FLOWERS_PER_CHUNK) continue;
+      const t = 0.92 + rand() * 0.16;
+      putTo(set, rand, x, z, h, 0.8 + rand() * 0.6, rand() * Math.PI * 2, 0.3, color.setRGB(t, t, t));
+      placed++;
+    }
+
+    // pebbles: mostly on and near the river banks
+    const peb = out[4];
+    guard = 0;
+    while (peb.n < PEBBLES_PER_CHUNK && guard++ < 160) {
+      const x = rx(); const z = rz();
+      if (isWater(terrain, x, z)) continue;
+      const h = heightAt(terrain, x, z);
+      if (h < -0.4 || slopeAt(x, z) > 1.0) continue;
+      const bank = h < 0.9;
+      if (!bank && rand() > 0.12) continue;
+      const t = 0.78 + rand() * 0.42;
+      putTo(peb, rand, x, z, h, 0.7 + rand() * 1.1, rand() * Math.PI * 2, 0.4, color.setRGB(t * (rand() < 0.3 ? 1.1 : 1), t, t * (rand() < 0.3 ? 0.88 : 1)));
+    }
+    return out;
   }
 
-  // ---- pebbles: mostly on and near the river banks
-  guard = 0;
-  while (pebbles.n < PEBBLE_N && guard++ < PEBBLE_N * 200) {
-    const x = lo + rand() * (hi - lo);
-    const z = lo + rand() * (hi - lo);
-    if (isWater(terrain, x, z)) continue;
-    const h = heightAt(terrain, x, z);
-    if (h < -0.4 || slopeAt(x, z) > 1.0) continue;
-    const bank = h < 0.9;
-    if (!bank && rand() > 0.22) continue;
-    const i = put(pebbles, x, z, h, 0.7 + rand() * 1.1, rand() * Math.PI * 2, 0.4);
-    const t = 0.78 + rand() * 0.42;
-    pebbles.mesh.setColorAt(i, color.setRGB(t * (rand() < 0.3 ? 1.1 : 1), t, t * (rand() < 0.3 ? 0.88 : 1)));
-  }
-
-  const sets = [tufts, ...flowerSets, pebbles];
-  for (const s of sets) {
-    s.mesh.count = s.n;
-    s.mesh.instanceMatrix.needsUpdate = true;
-    if (s.mesh.instanceColor) s.mesh.instanceColor.needsUpdate = true;
-  }
-
-  // ---- hiding under buildings / fields / worn paths
-  const ZERO = new Float32Array(16);
+  // ---- the live set: instances near the focus, minus anything under buildings / fields / worn paths ----
+  let grass = getGraphics().grass;
+  let focusX = SIZE / 2;
+  let focusZ = SIZE / 2;
+  let builtX = NaN;
+  let builtZ = NaN;
   let timer = DETAIL_REFRESH;
   let time = 0;
+  let forceRebuild = true;
+  let pending = false;
+  let first = true;
 
-  function recompute(state) {
+  const offGfx = onGraphicsChange((g) => { grass = g.grass; forceRebuild = true; });
+
+  function wearSample(wear, x, z) {
+    const g = Math.round(Math.sqrt(wear.length));
+    const c = SIZE / g;
+    const ix = Math.min(g - 1, Math.max(0, Math.floor(x / c)));
+    const iz = Math.min(g - 1, Math.max(0, Math.floor(z / c)));
+    return wear[iz * g + ix];
+  }
+
+  function rebuild(state) {
     const bl = [];
     for (const b of state.buildings || []) {
       const info = BUILDINGS[b.type];
@@ -932,49 +1123,93 @@ export function createGroundDetail(parent, terrain) {
     const fields = [];
     for (const z of state.zones || []) if (z.kind === 'field') fields.push(z.x, z.z, z.r * z.r);
     const wear = state.wear;
-    for (const s of sets) {
-      let changed = false;
-      for (let i = 0; i < s.n; i++) {
-        const x = s.x[i]; const z = s.z[i];
-        let hide = false;
-        for (let k = 0; k < bl.length && !hide; k += 3) {
-          const dx = x - bl[k]; const dz = z - bl[k + 1];
-          if (dx * dx + dz * dz < bl[k + 2]) hide = true;
-        }
-        for (let k = 0; k < fields.length && !hide; k += 3) {
-          const dx = x - fields[k]; const dz = z - fields[k + 1];
-          if (dx * dx + dz * dz < fields[k + 2]) hide = true;
-        }
-        if (!hide && wear && wearAt(wear, x, z) > 0.35) hide = true;
-        const h = hide ? 1 : 0;
-        if (h !== s.hidden[i]) {
-          s.hidden[i] = h;
-          const arr = s.mesh.instanceMatrix.array;
-          if (h) arr.set(ZERO, i * 16);
-          else arr.set(s.base.subarray(i * 16, i * 16 + 16), i * 16);
-          changed = true;
+    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+    pending = false;
+
+    for (let li = 0; li < layers.length; li++) {
+      const L = layers[li];
+      const g = L.grass ? grass : 1;
+      let n = 0;
+      if (g > 0) {
+        const mArr = L.mesh.instanceMatrix.array;
+        const cArr = L.mesh.instanceColor.array;
+        const cx0 = Math.max(0, Math.floor((focusX - L.far) / GD_CHUNK));
+        const cx1 = Math.min(nc - 1, Math.floor((focusX + L.far) / GD_CHUNK));
+        const cz0 = Math.max(0, Math.floor((focusZ - L.far) / GD_CHUNK));
+        const cz1 = Math.min(nc - 1, Math.floor((focusZ + L.far) / GD_CHUNK));
+        const span = L.far - L.near;
+        for (let cz = cz0; cz <= cz1; cz++) {
+          for (let cx = cx0; cx <= cx1; cx++) {
+            // nearest point of the chunk rectangle to the focus
+            const nx = Math.max(cx * GD_CHUNK, Math.min(focusX, (cx + 1) * GD_CHUNK));
+            const nz = Math.max(cz * GD_CHUNK, Math.min(focusZ, (cz + 1) * GD_CHUNK));
+            if ((nx - focusX) ** 2 + (nz - focusZ) ** 2 > L.far * L.far) continue;
+            const key = cz * nc + cx;
+            let data = chunkData.get(key);
+            if (!data) {
+              if (!first && typeof performance !== 'undefined' && performance.now() - t0 > GD_GEN_BUDGET_MS) { pending = true; continue; }
+              data = genChunk(cx, cz);
+              chunkData.set(key, data);
+            }
+            const set = data[li];
+            for (let i = 0; i < set.n && n < L.cap; i++) {
+              const u = set.rank[i] / g;
+              if (u >= 1) continue;
+              const x = set.x[i]; const z = set.z[i];
+              const dx = x - focusX; const dz = z - focusZ;
+              const d2 = dx * dx + dz * dz;
+              const thr = L.far - u * span;
+              if (d2 > thr * thr) continue;
+              let hide = false;
+              for (let k = 0; k < bl.length && !hide; k += 3) {
+                const ex = x - bl[k]; const ez = z - bl[k + 1];
+                if (ex * ex + ez * ez < bl[k + 2]) hide = true;
+              }
+              for (let k = 0; k < fields.length && !hide; k += 3) {
+                const ex = x - fields[k]; const ez = z - fields[k + 1];
+                if (ex * ex + ez * ez < fields[k + 2]) hide = true;
+              }
+              if (!hide && wear && wearSample(wear, x, z) > 0.35) hide = true;
+              if (hide) continue;
+              mArr.set(set.mat.subarray(i * 16, i * 16 + 16), n * 16);
+              cArr[n * 3] = set.col[i * 3]; cArr[n * 3 + 1] = set.col[i * 3 + 1]; cArr[n * 3 + 2] = set.col[i * 3 + 2];
+              n++;
+            }
+          }
         }
       }
-      if (changed) s.mesh.instanceMatrix.needsUpdate = true;
+      L.mesh.count = n;
+      L.mesh.visible = n > 0;
+      L.mesh.instanceMatrix.needsUpdate = true;
+      L.mesh.instanceColor.needsUpdate = true;
     }
+    first = false;
+    builtX = focusX;
+    builtZ = focusZ;
+    forceRebuild = pending;
   }
 
   const windMats = [tuftMat, flowerMat];
 
-  function update(state, dt = 0) {
+  // focus: the view target ({x, z}); falls back to the last known one
+  function update(state, dt = 0, focus) {
     time += dt;
     for (const m of windMats) m.userData.timeU.value = time;
+    if (focus) { focusX = focus.x; focusZ = focus.z; }
     timer += dt;
-    if (timer >= DETAIL_REFRESH) {
+    const moved = Math.hypot(focusX - builtX, focusZ - builtZ);
+    if (forceRebuild || !(moved < GD_MOVE) || timer >= DETAIL_REFRESH) {
       timer = 0;
-      recompute(state);
+      rebuild(state);
     }
   }
 
   function dispose() {
-    for (const s of sets) { root.remove(s.mesh); s.mesh.dispose(); }
+    offGfx();
+    for (const L of layers) { root.remove(L.mesh); L.mesh.dispose(); }
     [tuftGeo, ...flowerGeos, pebbleGeo].forEach((g) => g.dispose());
     [tuftMat, flowerMat, pebbleMat].forEach((m) => m.dispose());
+    chunkData.clear();
     parent.remove(root);
   }
 

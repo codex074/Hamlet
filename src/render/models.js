@@ -6,7 +6,7 @@
 //   MAT, WINDOW_MATERIALS, NODE_MODELS, VILLAGER_MODEL, CARRY_MODEL           (unchanged shapes)
 //   makeBuildingModel(type, { level = 1 (houses 1..5), stage = 0, seed = 0 } = {}) -> THREE.Group
 //     types: townhall storehouse woodcutter forager quarry sawmill farmhouse mill bakery chapel tavern cathedral house
-//            fishery hunter herbalist sheepfarm ironmine weaver blacksmith infirmary market
+//            fishery hunter herbalist forester sheepfarm ironmine weaver blacksmith infirmary market
 // sheepfarm: group.userData.pen = { x, z, r } (local pen centre / radius, open grass inside, for the sheep).
 // blacksmith hearth uses the 'hot' glass material (member of WINDOW_MATERIALS: glows with emissiveIntensity).
 //   makeSiteModel(radius = 4, seed = 0) -> THREE.Group
@@ -2323,6 +2323,137 @@ function herbalist(k, st) {
   mushrooms(k, 1.5, -2.2);
 }
 
+
+// ---------------------------------------------------------------- forester
+
+// Small nursery sapling: thin stem and a tuft of leaf blobs. s scales it (0.6 = seedling, 1.4 = young whip).
+function seedling(k, x, z, y = 0, s = 1) {
+  const c = LEAVES[k.r.int(4)];
+  k.cyl('flat', 0.014 * s, 0.01 * s, 0.24 * s, x, y, z, 3, { c: 0x7a5a3a, caps: 'none', ao: false });
+  k.sph('flat', 0.08 * s, 0.1 * s, 0.08 * s, x, y + 0.28 * s, z, 5, 2, { c, j: 0.12, ao: false });
+  if (s > 1.1) k.sph('flat', 0.055 * s, 0.065 * s, 0.055 * s, x + 0.06 * s, y + 0.18 * s, z - 0.02, 4, 2, { c: LEAVES[2], j: 0.1, ao: false });
+}
+
+// Raised plank bed of saplings that grow taller row by row (nursery stock at different ages).
+function nurseryBed(k, x, z, w, d, ry = 0) {
+  k.push(x, 0, z, ry);
+  const t = 0.07;
+  k.box('planks', w, 0.22, t, 0, 0, d / 2 - t / 2, { c: 0x8a6240 });
+  k.box('planks', w, 0.22, t, 0, 0, -d / 2 + t / 2, { c: 0x8a6240 });
+  for (const sx of [-1, 1]) k.box('planks', t, 0.22, d - 2 * t, sx * (w / 2 - t / 2), 0, 0, { c: 0x8a6240 });
+  k.box('flat', w - 2 * t, 0.19, d - 2 * t, 0, 0, 0, { c: SOIL, nb: true });
+  const cols = Math.max(2, Math.round((w - 0.2) / 0.36));
+  const rows = Math.max(2, Math.round((d - 0.2) / 0.34));
+  for (let j = 0; j < rows; j++) {
+    const grow = 0.85 + (rows > 1 ? j / (rows - 1) : 0) * 0.9;
+    for (let i = 0; i < cols; i++) {
+      const px = -w / 2 + 0.17 + ((w - 0.34) * i) / (cols - 1) + (k.r() - 0.5) * 0.04;
+      const pz = -d / 2 + 0.16 + ((d - 0.32) * j) / Math.max(1, rows - 1);
+      seedling(k, px, pz, 0.19, grow * (0.9 + k.r() * 0.2));
+    }
+  }
+  k.pop();
+}
+
+// A taller staked young tree for the yard.
+function youngTree(k, x, z, s = 1) {
+  k.push(x, 0, z, k.r() * 6.28);
+  k.cyl('timber', 0.09 * s, 0.05 * s, 1.6 * s, 0, 0, 0, 5, { c: 0x6a5035, caps: 'none', rx: 0.04 });
+  k.sph('flat', 0.62 * s, 0.55 * s, 0.62 * s, 0.05 * s, 1.85 * s, 0, 6, 3, { c: LEAVES[0], j: 0.1 });
+  k.sph('flat', 0.42 * s, 0.4 * s, 0.42 * s, 0.4 * s, 1.5 * s, 0.1 * s, 5, 3, { c: LEAVES[2], j: 0.1 });
+  k.sph('flat', 0.38 * s, 0.36 * s, 0.38 * s, -0.32 * s, 1.45 * s, -0.12 * s, 5, 3, { c: LEAVES[1], j: 0.1 });
+  k.bar('timber', [0.28 * s, 0, 0.18 * s], [0.28 * s, 1.35 * s, 0.18 * s], 0.05, 0.05, { c: 0xa98a5a });
+  k.pop();
+}
+
+function wateringCan(k, x, z, y = 0, ry = 0, s = 1) {
+  k.push(x, y, z, ry, s);
+  k.cyl('flat', 0.17, 0.15, 0.3, 0, 0, 0, 8, { c: 0x8d9aa0, caps: 'top', ao: false });
+  for (const hy of [0.05, 0.23]) k.cyl('flat', 0.18, 0.18, 0.03, 0, hy, 0, 8, { c: 0x66727a, caps: 'none', ao: false });
+  k.bar('flat', [0.13, 0.06, 0], [0.4, 0.3, 0], 0.05, 0.05, { c: 0x7e8a90, ao: false });
+  k.cone('flat', 0.07, 0.07, 0.4, 0.31, 0, 6, { c: 0x66727a, rz: -0.86, caps: 'none', ao: false });
+  const loop = [[-0.12, 0.3], [-0.25, 0.22], [-0.25, 0.1], [-0.16, 0.02]];
+  for (let i = 0; i < loop.length - 1; i++) k.bar('flat', [loop[i][0], loop[i][1], 0], [loop[i + 1][0], loop[i + 1][1], 0], 0.035, 0.035, { c: 0x66727a, ao: false });
+  k.pop();
+}
+
+function seedlingCrate(k, x, z, y = 0, ry = 0, s = 1) {
+  k.push(x, y, z, ry, s);
+  crate(k, 0, 0, 0, 1, 0);
+  k.box('flat', 0.5, 0.04, 0.42, 0, 0.42, 0, { c: SOIL, ao: false });
+  for (let i = 0; i < 4; i++) seedling(k, -0.12 + (i % 2) * 0.24, -0.1 + Math.floor(i / 2) * 0.2, 0.44, 0.7 + k.r() * 0.5);
+  k.pop();
+}
+
+// Sapling with its root ball wrapped in burlap, waiting to be planted.
+function rootBall(k, x, z, s = 1) {
+  k.push(x, 0, z, k.r() * 6.28, s);
+  k.sph('flat', 0.18, 0.15, 0.18, 0, 0.15, 0, 6, 3, { c: 0xc8b27c, j: 0.1 });
+  k.cone('flat', 0.07, 0.1, 0, 0.27, 0, 5, { c: 0xa89468, caps: 'none', ao: false });
+  k.cyl('flat', 0.014, 0.01, 0.55, 0, 0.3, 0, 3, { c: 0x7a5a3a, caps: 'none', ao: false });
+  k.sph('flat', 0.15, 0.17, 0.15, 0, 0.92, 0, 5, 3, { c: LEAVES[k.r.int(4)], j: 0.12, ao: false });
+  k.pop();
+}
+
+function forester(k, st) {
+  const w = 2.4, d = 2.0, h = 1.55, y0 = 0.2;
+  const tc = TIMBERS[1];
+  k.push(0.2, 0, -0.9, 0);
+  k.box('stone', w + 0.16, y0, d + 0.16, 0, 0, 0, { c: st.stone, nb: true });
+  storey(k, {
+    w, d, h, y: y0, mat: 'planks', tint: 0xcfae7c, frame: true, tc, st, sp: 1.3, bp: 0.4,
+    f: [
+      { t: 'door', x: -0.5, w: 0.75, h: 1.4, step: true },
+      { t: 'win', x: 0.55, y: 0.72, w: 0.5, h: 0.5, shut: true, flowers: true, shutc: 0x4f7a62 },
+      { t: 'lantern', x: -1.0, y: 1.3 },
+    ],
+    r: [{ t: 'win', x: 0, y: 0.72, w: 0.42, h: 0.46, shut: true, shutc: 0x4f7a62 }],
+    l: [{ t: 'win', x: 0, y: 0.72, w: 0.42, h: 0.46, shut: true, shutc: 0x4f7a62 }], b: [],
+  });
+  const R = 1.3;
+  gableRoof(k, { w, d, y: y0 + h, type: 'thatch', R, ox: 0.3, oz: 0.5, tint: 0xa9c860, fill: { key: 'planks', tint: 0xcfae7c }, tc });   // mossy thatch
+  for (const sx of [-1, 1]) {
+    k.push(sx * w / 2, y0 + h, 0, sx * Math.PI / 2);
+    gableFrame(k, d, R, tc);
+    k.pop();
+  }
+  gableChimney(k, 1, w, 0.0, y0 + h + 0.3, y0 + h + R + 0.4);
+  // tools on the side wall: leaning rake
+  k.bar('timber', [1.55, 0, 0.55], [1.42, 1.65, 0.5], 0.05, 0.05, { c: 0x7a5a3a });
+  k.box('flat', 0.4, 0.05, 0.05, 1.56, 0.06, 0.56, { c: IRON, ry: 0.2 });
+  k.pop();
+
+  // nursery beds in front, saplings growing taller toward the back
+  nurseryBed(k, -1.6, 1.7, 1.5, 0.75, 0.05);
+  nurseryBed(k, 0.2, 2.35, 1.5, 0.75, -0.05);
+  nurseryBed(k, 2.0, 1.75, 1.3, 0.75, 0.3);
+  nurseryBed(k, 2.7, -0.3, 0.7, 1.5, 0.08);
+  fence(k, -2.35, 2.75, -2.5, 0.7, 'wattle', 0.5);
+  fence(k, 1.2, 3.15, 3.0, 2.6, 'wattle', 0.5);
+  // watering can by the beds, rain barrel at the hut corner
+  wateringCan(k, -0.55, 1.15, 0, 0.5, 1.35);
+  barrel(k, -1.35, 0.15, 0, 1);
+  k.disc('flat', 0.28, -1.35, 0.46, 0.15, 8, { c: 0x4f7aa0, ao: false });
+  // seedling crates and wrapped saplings waiting to be planted
+  seedlingCrate(k, -2.5, 0.3, 0, 0.3, 1);
+  seedlingCrate(k, -2.55, -0.45, 0, -0.1, 1);
+  seedlingCrate(k, -2.5, -0.1, 0.5, 0.2, 0.9);
+  rootBall(k, -2.0, -1.3, 1);
+  rootBall(k, -1.55, -1.45, 0.9);
+  rootBall(k, -1.2, -1.2, 1.05);
+  youngTree(k, -2.9, -1.9, 1.15);
+  youngTree(k, 3.0, -1.7, 0.9);
+  // spade standing in the soil + sign post
+  k.bar('timber', [0.95, 0.15, 1.95], [0.98, 1.0, 1.95], 0.05, 0.05, { c: 0x7a5a3a });
+  k.box('flat', 0.14, 0.22, 0.03, 0.95, 0.0, 1.95, { c: IRON });
+  k.box('timber', 0.18, 0.05, 0.06, 0.99, 0.98, 1.95, { c: 0x7a5a3a });
+  k.box('timber', 0.1, 1.2, 0.1, 1.9, 0, 3.0, { c: tc });
+  signBoard(k, 1.9, 0.78, 3.06, 0.6, 0.34, 0xc29a68, 0.15);
+  k.sph('flat', 0.09, 0.11, 0.03, 1.9, 0.9, 3.12, 4, 2, { c: LEAVES[0], ao: false });
+  bush(k, 3.0, 0.9, 0.45);
+  mushrooms(k, 2.0, -2.3);
+}
+
 // ---------------------------------------------------------------- sheep farm
 
 function sheepfarm(k, st) {
@@ -3289,7 +3420,7 @@ function styleFor(seed) {
 
 const BUILDERS = {
   townhall, storehouse, woodcutter, forager, quarry, sawmill, farmhouse, mill, bakery, chapel, tavern,
-  fishery, hunter, herbalist, sheepfarm, ironmine, weaver, blacksmith, infirmary, market,
+  fishery, hunter, herbalist, forester, sheepfarm, ironmine, weaver, blacksmith, infirmary, market,
 };
 
 export function makeBuildingModel(type, { level = 1, stage = 0, seed = 0 } = {}) {

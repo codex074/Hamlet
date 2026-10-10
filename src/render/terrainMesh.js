@@ -1,10 +1,12 @@
-// Terrain mesh with baked vertex colours, a water plane, and a cheap wear/zone recolour pass.
+// Terrain split into 80 m chunks (each frustum culled), baked vertex colours, chunked water, and a cheap
+// wear / zone / territory recolour pass. Reads terrain.size / terrain.grid (falls back to the small-map config).
 import * as THREE from '../../vendor/three.module.js';
-import { WORLD_SIZE, GRID, CELL, MAX_HEIGHT } from '../config.js';
+import { WORLD_SIZE, GRID, MAX_HEIGHT } from '../config.js';
 import { smoothstep } from '../wear.js';
 import { mulberry32, makeNoise2D, fbm } from '../rng.js';
+import { setViewWorldSize } from './viewworld.js';
 
-const VERTS = GRID + 1;
+const CHUNK = 80;                 // metres per terrain chunk (frustum culled individually)
 const WATER_Y = 0.05;
 const UV_SCALE = 1 / 9; // detail texture repeats every 9 m
 
@@ -92,13 +94,17 @@ function makeDetailTexture() {
   return tex;
 }
 
+
 export function createTerrainMesh(terrain) {
+  const SIZE = terrain.size || WORLD_SIZE;
+  const G = terrain.grid || GRID;
+  setViewWorldSize(SIZE);
+  const CELL = SIZE / G;
+  const VERTS = G + 1;
   const { heights, fertility, water } = terrain;
   const count = VERTS * VERTS;
-  const positions = new Float32Array(count * 3);
-  const uvs = new Float32Array(count * 2);
-  const colors = new Float32Array(count * 3);
   const base = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);   // full-grid working colours; chunks copy their slice
   const dirtShade = new Float32Array(count);
 
   const nBig = makeNoise2D(11);
@@ -106,11 +112,11 @@ export function createTerrainMesh(terrain) {
   const nSmall = makeNoise2D(13);
 
   const cellWater = (ix, iz) => {
-    if (ix < 0 || iz < 0 || ix >= GRID || iz >= GRID) return 0;
-    return water[iz * GRID + ix];
+    if (ix < 0 || iz < 0 || ix >= G || iz >= G) return 0;
+    return water[iz * G + ix];
   };
-  const cellFert = (ix, iz) => fertility[Math.min(GRID - 1, Math.max(0, iz)) * GRID + Math.min(GRID - 1, Math.max(0, ix))];
-  const hAt = (ix, iz) => heights[Math.min(GRID, Math.max(0, iz)) * VERTS + Math.min(GRID, Math.max(0, ix))];
+  const cellFert = (ix, iz) => fertility[Math.min(G - 1, Math.max(0, iz)) * G + Math.min(G - 1, Math.max(0, ix))];
+  const hAt = (ix, iz) => heights[Math.min(G, Math.max(0, iz)) * VERTS + Math.min(G, Math.max(0, ix))];
 
   const col = new THREE.Color();
   for (let iz = 0; iz < VERTS; iz++) {
@@ -119,11 +125,6 @@ export function createTerrainMesh(terrain) {
       const h = heights[i];
       const x = ix * CELL;
       const z = iz * CELL;
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = h;
-      positions[i * 3 + 2] = z;
-      uvs[i * 2] = x * UV_SCALE;
-      uvs[i * 2 + 1] = z * UV_SCALE;
 
       // the four cells meeting at this vertex
       const wc = cellWater(ix - 1, iz - 1) + cellWater(ix, iz - 1) + cellWater(ix - 1, iz) + cellWater(ix, iz);
@@ -158,83 +159,105 @@ export function createTerrainMesh(terrain) {
   }
   colors.set(base);
 
-  const indices = new Uint32Array(GRID * GRID * 6);
-  let k = 0;
-  for (let iz = 0; iz < GRID; iz++) {
-    for (let ix = 0; ix < GRID; ix++) {
-      const a = iz * VERTS + ix;
-      const b = a + 1;
-      const c = a + VERTS;
-      const d = c + 1;
-      // alternate the diagonal for a less regular look
-      if ((ix + iz) % 2 === 0) {
-        indices[k++] = a; indices[k++] = c; indices[k++] = b;
-        indices[k++] = b; indices[k++] = c; indices[k++] = d;
-      } else {
-        indices[k++] = a; indices[k++] = c; indices[k++] = d;
-        indices[k++] = a; indices[k++] = d; indices[k++] = b;
-      }
+  // Smooth global normals (central differences) so chunk borders have no lighting seams.
+  const normals = new Float32Array(count * 3);
+  for (let iz = 0; iz < VERTS; iz++) {
+    for (let ix = 0; ix < VERTS; ix++) {
+      const nx = hAt(ix - 1, iz) - hAt(ix + 1, iz);
+      const nz = hAt(ix, iz - 1) - hAt(ix, iz + 1);
+      const ny = 2 * CELL;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      const i = (iz * VERTS + ix) * 3;
+      normals[i] = nx / l; normals[i + 1] = ny / l; normals[i + 2] = nz / l;
     }
   }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  const colorAttr = new THREE.BufferAttribute(colors, 3);
-  colorAttr.setUsage(THREE.DynamicDrawUsage);
-  geometry.setAttribute('color', colorAttr);
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
 
   const detail = makeDetailTexture();
-  const mesh = new THREE.Mesh(
-    geometry,
-    new THREE.MeshLambertMaterial({ vertexColors: true, map: detail }),
-  );
-  mesh.receiveShadow = true;
-  mesh.name = 'terrain';
+  const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: detail });
+  const cellsPerChunk = Math.max(1, Math.round(CHUNK / CELL));
+  const nChunks = Math.ceil(G / cellsPerChunk);
 
-  // ---- water: only quads near/below the water line, with per-vertex depth colour + alpha
-  const wPos = [];
-  const wCol = [];
-  const wIdx = [];
-  const wMap = new Int32Array(count).fill(-1);
-  const depthAt = (i) => WATER_Y - heights[i];
-  const useVert = (i) => {
-    if (wMap[i] >= 0) return wMap[i];
-    const ix = i % VERTS;
-    const iz = (i - ix) / VERTS;
-    const d = depthAt(i);
-    const t = sstep(0.0, 0.8, d);
-    const c = new THREE.Color().copy(WATER_SHALLOW).lerp(WATER_DEEP, t);
-    const foam = sstep(0.16, -0.02, d);
-    c.lerp(WATER_FOAM, foam * 0.55);
-    const alpha = 0.3 + 0.62 * sstep(0.0, 0.75, d);
-    wPos.push(ix * CELL, WATER_Y, iz * CELL);
-    wCol.push(c.r, c.g, c.b, alpha);
-    wMap[i] = wPos.length / 3 - 1;
-    return wMap[i];
-  };
-  for (let iz = 0; iz < GRID; iz++) {
-    for (let ix = 0; ix < GRID; ix++) {
-      const a = iz * VERTS + ix;
-      const b = a + 1;
-      const c = a + VERTS;
-      const d = c + 1;
-      if (depthAt(a) < -0.25 && depthAt(b) < -0.25 && depthAt(c) < -0.25 && depthAt(d) < -0.25) continue;
-      const va = useVert(a); const vb = useVert(b); const vc = useVert(c); const vd = useVert(d);
-      if ((ix + iz) % 2 === 0) wIdx.push(va, vc, vb, vb, vc, vd);
-      else wIdx.push(va, vc, vd, va, vd, vb);
+  const group = new THREE.Group();
+  group.name = 'terrain';
+  const chunks = [];       // { mesh, colorAttr, ix0, iz0, w, h }
+  const indexCache = new Map();
+
+  function chunkIndex(w, h, parity) {
+    const key = `${w}x${h}x${parity}`;
+    let idx = indexCache.get(key);
+    if (idx) return idx;
+    const vw = w + 1;
+    idx = (vw * (h + 1) > 65535 ? new Uint32Array(w * h * 6) : new Uint16Array(w * h * 6));
+    let k = 0;
+    for (let iz = 0; iz < h; iz++) {
+      for (let ix = 0; ix < w; ix++) {
+        const a = iz * vw + ix;
+        const b = a + 1;
+        const c = a + vw;
+        const d = c + 1;
+        if ((ix + iz + parity) % 2 === 0) {
+          idx[k++] = a; idx[k++] = c; idx[k++] = b;
+          idx[k++] = b; idx[k++] = c; idx[k++] = d;
+        } else {
+          idx[k++] = a; idx[k++] = c; idx[k++] = d;
+          idx[k++] = a; idx[k++] = d; idx[k++] = b;
+        }
+      }
+    }
+    indexCache.set(key, idx);
+    return idx;
+  }
+
+  for (let cz = 0; cz < nChunks; cz++) {
+    for (let cx = 0; cx < nChunks; cx++) {
+      const ix0 = cx * cellsPerChunk;
+      const iz0 = cz * cellsPerChunk;
+      const w = Math.min(cellsPerChunk, G - ix0);
+      const h = Math.min(cellsPerChunk, G - iz0);
+      const vw = w + 1;
+      const vh = h + 1;
+      const pos = new Float32Array(vw * vh * 3);
+      const nor = new Float32Array(vw * vh * 3);
+      const uv = new Float32Array(vw * vh * 2);
+      const clr = new Float32Array(vw * vh * 3);
+      for (let j = 0; j < vh; j++) {
+        for (let i = 0; i < vw; i++) {
+          const gi = (iz0 + j) * VERTS + (ix0 + i);
+          const li = j * vw + i;
+          pos[li * 3] = (ix0 + i) * CELL;
+          pos[li * 3 + 1] = heights[gi];
+          pos[li * 3 + 2] = (iz0 + j) * CELL;
+          nor[li * 3] = normals[gi * 3]; nor[li * 3 + 1] = normals[gi * 3 + 1]; nor[li * 3 + 2] = normals[gi * 3 + 2];
+          uv[li * 2] = (ix0 + i) * CELL * UV_SCALE;
+          uv[li * 2 + 1] = (iz0 + j) * CELL * UV_SCALE;
+          clr[li * 3] = base[gi * 3]; clr[li * 3 + 1] = base[gi * 3 + 1]; clr[li * 3 + 2] = base[gi * 3 + 2];
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      const colorAttr = new THREE.BufferAttribute(clr, 3);
+      colorAttr.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('color', colorAttr);
+      geo.setIndex(new THREE.BufferAttribute(chunkIndex(w, h, (ix0 + iz0) % 2), 1));
+      geo.computeBoundingSphere();
+      geo.computeBoundingBox();
+      const mesh = new THREE.Mesh(geo, terrainMat);
+      mesh.receiveShadow = true;
+      mesh.name = `terrain-${cx}-${cz}`;
+      group.add(mesh);
+      chunks.push({ mesh, colorAttr, ix0, iz0, w, h, vw });
     }
   }
-  const waterGeo = new THREE.BufferGeometry();
-  waterGeo.setAttribute('position', new THREE.Float32BufferAttribute(wPos, 3));
-  waterGeo.setAttribute('color', new THREE.Float32BufferAttribute(wCol, 4));
-  waterGeo.setIndex(wIdx);
-  waterGeo.computeVertexNormals();
-  waterGeo.computeBoundingSphere();
+  // Ray picks call intersectObject(group, false): forward to the chunk meshes (cheap bounding-sphere reject each).
+  group.raycast = (raycaster, intersects) => {
+    for (const c of chunks) c.mesh.raycast(raycaster, intersects);
+  };
 
+  // ---- water: chunked too; only quads near/below the water line, with per-vertex depth colour + alpha
+  const waterGroup = new THREE.Group();
+  waterGroup.name = 'water';
   const timeU = { value: 0 };
   const waterMat = new THREE.MeshStandardMaterial({
     vertexColors: true, transparent: true, depthWrite: false, roughness: 0.28, metalness: 0,
@@ -263,24 +286,118 @@ export function createTerrainMesh(terrain) {
   normal = normalize( normal + ( viewMatrix * vec4( gw, 0.0 ) ).xyz );
 }`);
   };
-  const waterMesh = new THREE.Mesh(waterGeo, waterMat);
-  waterMesh.renderOrder = 1;
-  waterMesh.name = 'water';
-  // self-animated: no update() call needed from the integrator
-  waterMesh.onBeforeRender = () => { timeU.value = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000; };
+  const depthAt = (i) => WATER_Y - heights[i];
+  const waterTmp = new THREE.Color();
+  const waterOnBefore = () => { timeU.value = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000; };
+
+  for (const ch of chunks) {
+    const wPos = [];
+    const wCol = [];
+    const wIdx = [];
+    const wMap = new Map();
+    const useVert = (i) => {
+      let v = wMap.get(i);
+      if (v !== undefined) return v;
+      const ix = i % VERTS;
+      const iz = (i - ix) / VERTS;
+      const d = depthAt(i);
+      const t = sstep(0.0, 0.8, d);
+      waterTmp.copy(WATER_SHALLOW).lerp(WATER_DEEP, t);
+      const foam = sstep(0.16, -0.02, d);
+      waterTmp.lerp(WATER_FOAM, foam * 0.55);
+      const alpha = 0.3 + 0.62 * sstep(0.0, 0.75, d);
+      wPos.push(ix * CELL, WATER_Y, iz * CELL);
+      wCol.push(waterTmp.r, waterTmp.g, waterTmp.b, alpha);
+      v = wPos.length / 3 - 1;
+      wMap.set(i, v);
+      return v;
+    };
+    for (let j = 0; j < ch.h; j++) {
+      for (let i = 0; i < ch.w; i++) {
+        const ix = ch.ix0 + i;
+        const iz = ch.iz0 + j;
+        const a = iz * VERTS + ix;
+        const b = a + 1;
+        const c = a + VERTS;
+        const d = c + 1;
+        if (depthAt(a) < -0.25 && depthAt(b) < -0.25 && depthAt(c) < -0.25 && depthAt(d) < -0.25) continue;
+        const va = useVert(a); const vb = useVert(b); const vc = useVert(c); const vd = useVert(d);
+        if ((ix + iz) % 2 === 0) wIdx.push(va, vc, vb, vb, vc, vd);
+        else wIdx.push(va, vc, vd, va, vd, vb);
+      }
+    }
+    if (!wIdx.length) continue;
+    const up = new Float32Array(wPos.length);
+    for (let k = 1; k < up.length; k += 3) up[k] = 1;
+    const waterGeo = new THREE.BufferGeometry();
+    waterGeo.setAttribute('position', new THREE.Float32BufferAttribute(wPos, 3));
+    waterGeo.setAttribute('normal', new THREE.BufferAttribute(up, 3));
+    waterGeo.setAttribute('color', new THREE.Float32BufferAttribute(wCol, 4));
+    waterGeo.setIndex(wIdx);
+    waterGeo.computeBoundingSphere();
+    const wm = new THREE.Mesh(waterGeo, waterMat);
+    wm.renderOrder = 1;
+    wm.name = 'water-chunk';
+    wm.onBeforeRender = waterOnBefore;   // self-animated: no update() call needed from the integrator
+    waterGroup.add(wm);
+  }
 
   const tmp = new THREE.Color();
 
-  // Recolour: base -> zone tint -> wear (dirt paths on top). ~15k vertices, runs once a second.
-  function updateWear(wear, zones = []) {
-    colors.set(base);
+  // ---- territory: unowned land is desaturated and darkened (per-vertex amount 0..1, blended over the border cell)
+  let unowned = null;          // Float32Array(count) or null when everything is owned
+  let territorySig = '';
+  let lastWear = null;
+  let lastZones = [];
 
+  function setTerritory(territory) {
+    const owned = territory && territory.owned;
+    if (!owned || !owned.length) {
+      if (unowned) { unowned = null; territorySig = ''; recolor(); }
+      return;
+    }
+    let sig = owned.length + ':';
+    for (let i = 0; i < owned.length; i++) sig += owned[i] ? '1' : '0';
+    if (sig === territorySig) return;
+    territorySig = sig;
+    const plots = Math.max(1, Math.round(Math.sqrt(owned.length)));
+    const plot = SIZE / plots;
+    let allOwned = true;
+    for (let i = 0; i < owned.length; i++) if (!owned[i]) { allOwned = false; break; }
+    if (allOwned) { unowned = null; recolor(); return; }
+    const cellVal = new Float32Array(G * G);
+    for (let iz = 0; iz < G; iz++) {
+      const pz = Math.min(plots - 1, Math.floor(((iz + 0.5) * CELL) / plot));
+      for (let ix = 0; ix < G; ix++) {
+        const px = Math.min(plots - 1, Math.floor(((ix + 0.5) * CELL) / plot));
+        cellVal[iz * G + ix] = owned[pz * plots + px] ? 0 : 1;
+      }
+    }
+    const u = new Float32Array(count);
+    for (let iz = 0; iz < VERTS; iz++) {
+      for (let ix = 0; ix < VERTS; ix++) {
+        const x0 = Math.max(0, ix - 1);
+        const x1 = Math.min(G - 1, ix);
+        const z0 = Math.max(0, iz - 1);
+        const z1 = Math.min(G - 1, iz);
+        u[iz * VERTS + ix] = (cellVal[z0 * G + x0] + cellVal[z0 * G + x1] + cellVal[z1 * G + x0] + cellVal[z1 * G + x1]) / 4;
+      }
+    }
+    unowned = u;
+    recolor();
+  }
+
+  // Recolour: base -> zone tint -> wear (dirt paths on top) -> unowned dimming, then copy into the chunks.
+  function recolor() {
+    colors.set(base);
+    const wear = lastWear;
+    const zones = lastZones;
     for (const z of zones) {
       const residential = z.kind === 'residential';
       const ix0 = Math.max(0, Math.floor((z.x - z.r) / CELL));
-      const ix1 = Math.min(GRID, Math.ceil((z.x + z.r) / CELL));
+      const ix1 = Math.min(G, Math.ceil((z.x + z.r) / CELL));
       const iz0 = Math.max(0, Math.floor((z.z - z.r) / CELL));
-      const iz1 = Math.min(GRID, Math.ceil((z.z + z.r) / CELL));
+      const iz1 = Math.min(G, Math.ceil((z.z + z.r) / CELL));
       for (let iz = iz0; iz <= iz1; iz++) {
         for (let ix = ix0; ix <= ix1; ix++) {
           const d = Math.hypot(ix * CELL - z.x, iz * CELL - z.z);
@@ -298,33 +415,95 @@ export function createTerrainMesh(terrain) {
       }
     }
 
-    for (let iz = 0; iz < VERTS; iz++) {
-      const rz0 = Math.max(0, iz - 1) * GRID;
-      const rz1 = Math.min(GRID - 1, iz) * GRID;
-      for (let ix = 0; ix < VERTS; ix++) {
-        const cx0 = Math.max(0, ix - 1);
-        const cx1 = Math.min(GRID - 1, ix);
-        // strongest of the four cells touching this vertex
-        let w = wear[rz0 + cx0];
-        const w1 = wear[rz0 + cx1];
-        const w2 = wear[rz1 + cx0];
-        const w3 = wear[rz1 + cx1];
-        if (w1 > w) w = w1;
-        if (w2 > w) w = w2;
-        if (w3 > w) w = w3;
-        if (w <= 0.15) continue;
-        const t = smoothstep(0.15, 0.8, w);
-        const vi = iz * VERTS + ix;
-        const i = vi * 3;
-        // trodden earth: dusty-light where well worn, mottled per vertex
-        tmp.copy(DIRT).lerp(DUST, smoothstep(0.55, 1, w) * 0.5).multiplyScalar(dirtShade[vi]);
-        colors[i] += (tmp.r - colors[i]) * t;
-        colors[i + 1] += (tmp.g - colors[i + 1]) * t;
-        colors[i + 2] += (tmp.b - colors[i + 2]) * t;
+    if (wear && wear.length) {
+      const wg = Math.round(Math.sqrt(wear.length));   // wear grid is derived from the array itself
+      const wcell = SIZE / wg;
+      const ratio = wcell / CELL;
+      const wAtCell = (cx, cz) => wear[Math.min(wg - 1, Math.max(0, cz)) * wg + Math.min(wg - 1, Math.max(0, cx))];
+      for (let iz = 0; iz < VERTS; iz++) {
+        for (let ix = 0; ix < VERTS; ix++) {
+          // strongest of the (up to) four wear cells touching this vertex
+          const px = (ix * CELL) / wcell;
+          const pz = (iz * CELL) / wcell;
+          const fx = Math.floor(px);
+          const fz = Math.floor(pz);
+          const onX = ratio <= 1 && Math.abs(px - fx) < 1e-6;
+          const onZ = ratio <= 1 && Math.abs(pz - fz) < 1e-6;
+          let w;
+          if (onX && onZ) {
+            w = wAtCell(fx - 1, fz - 1);
+            const w1 = wAtCell(fx, fz - 1); if (w1 > w) w = w1;
+            const w2 = wAtCell(fx - 1, fz); if (w2 > w) w = w2;
+            const w3 = wAtCell(fx, fz); if (w3 > w) w = w3;
+          } else {
+            w = wAtCell(fx, fz);
+          }
+          if (w <= 0.15) continue;
+          const t = smoothstep(0.15, 0.8, w);
+          const vi = iz * VERTS + ix;
+          const i = vi * 3;
+          // trodden earth: dusty-light where well worn, mottled per vertex
+          tmp.copy(DIRT).lerp(DUST, smoothstep(0.55, 1, w) * 0.5).multiplyScalar(dirtShade[vi]);
+          colors[i] += (tmp.r - colors[i]) * t;
+          colors[i + 1] += (tmp.g - colors[i + 1]) * t;
+          colors[i + 2] += (tmp.b - colors[i + 2]) * t;
+        }
       }
     }
-    colorAttr.needsUpdate = true;
+
+    if (unowned) {
+      for (let vi = 0; vi < count; vi++) {
+        const a = unowned[vi];
+        if (a <= 0.001) continue;
+        const i = vi * 3;
+        const r = colors[i]; const g = colors[i + 1]; const b = colors[i + 2];
+        const lum = 0.3 * r + 0.59 * g + 0.11 * b;
+        const dim = 1 - 0.34 * a;
+        const sat = 1 - 0.62 * a;
+        colors[i] = (lum + (r - lum) * sat) * dim;
+        colors[i + 1] = (lum + (g - lum) * sat) * dim;
+        colors[i + 2] = (lum + (b - lum) * sat * 0.9) * dim;
+      }
+    }
+
+    for (const ch of chunks) {
+      const arr = ch.colorAttr.array;
+      let changed = false;
+      for (let j = 0; j <= ch.h; j++) {
+        let gi = ((ch.iz0 + j) * VERTS + ch.ix0) * 3;
+        let li = j * ch.vw * 3;
+        for (let n = 0; n < ch.vw * 3; n++, gi++, li++) {
+          if (arr[li] !== colors[gi]) { arr[li] = colors[gi]; changed = true; }
+        }
+      }
+      if (changed) ch.colorAttr.needsUpdate = true;
+    }
   }
 
-  return { mesh, water: waterMesh, updateWear };
+  // wear: Float32Array (any square grid); zones: [{kind,x,z,r}]; territory: state.territory (optional here —
+  // the world view also pushes it via group.userData.setTerritory).
+  function updateWear(wear, zones = [], territory) {
+    lastWear = wear;
+    lastZones = zones;
+    if (territory !== undefined) {
+      // setTerritory() recolours on change; otherwise recolour here
+      const before = territorySig;
+      setTerritory(territory);
+      if (territorySig !== before) return;
+    }
+    recolor();
+  }
+
+  group.userData.setTerritory = setTerritory;
+  group.userData.size = SIZE;
+
+  function dispose() {
+    for (const c of chunks) c.mesh.geometry.dispose();
+    for (const m of waterGroup.children) m.geometry.dispose();
+    terrainMat.dispose();
+    waterMat.dispose();
+    if (detail) detail.dispose();
+  }
+
+  return { mesh: group, water: waterGroup, updateWear, setTerritory, dispose };
 }

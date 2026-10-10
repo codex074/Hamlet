@@ -10,8 +10,8 @@ import { createTerrainMesh } from '../src/render/terrainMesh.js';
 import { createWorldView } from '../src/render/world.js';
 
 const SEED = 1;
-const terrain = generateTerrain(SEED);
-const nodes = generateNodes(SEED, terrain);
+const terrain = generateTerrain(SEED, { mapSize: 'small' });
+const nodes = generateNodes(SEED, terrain, { mapSize: 'small' });
 
 // ---- fake state
 let nextId = 1;
@@ -64,7 +64,7 @@ for (let i = 0; i < 20; i++) {
   });
 }
 
-const wear = createWear();
+const wear = createWear(terrain.grid);
 function paintLine(x1, z1, x2, z2) {
   const n = Math.ceil(Math.hypot(x2 - x1, z2 - z1) / 1.0);
   for (let i = 0; i <= n; i++) {

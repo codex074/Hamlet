@@ -226,6 +226,30 @@ function boot(session) {
   window.addEventListener('resize', () => sceneApi.resize());
   sceneApi.resize();
 
+  // ---------- one tab per village ----------
+  // If the same village is opened in another tab, this (older) tab stops saving so it can't overwrite it.
+  const villageKey = cloud ? `cloud:${session.village.id}` : 'local';
+  try {
+    const channel = new BroadcastChannel('hamlet-tabs');
+    channel.onmessage = (e) => {
+      if (e.data && e.data.type === 'opened' && e.data.village === villageKey && !skipSave) {
+        skipSave = true;
+        setSpeed(0);
+        showTakenOver();
+      }
+    };
+    channel.postMessage({ type: 'opened', village: villageKey });
+  } catch { /* BroadcastChannel unavailable: nothing to coordinate */ }
+  function showTakenOver() {
+    const back = document.createElement('div');
+    back.className = 'backdrop';
+    back.innerHTML = `<div class="modal-box"><h2>หมู่บ้านนี้เปิดอยู่ในแท็บอื่น</h2>
+      <p>แท็บนี้หยุดเล่นและหยุดบันทึกแล้ว เพื่อไม่ให้เซฟทับกัน เล่นต่อในแท็บใหม่ได้เลย</p>
+      <div class="modal-actions"><button class="btn primary" type="button">โหลดหน้านี้ใหม่</button></div></div>`;
+    back.querySelector('button').addEventListener('click', () => location.reload());
+    document.body.appendChild(back);
+  }
+
   // ---------- autosave ----------
   setInterval(save, 30000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });

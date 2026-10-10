@@ -99,7 +99,7 @@ if (focus) {
   };
   const rowW = Math.max(
     place(['townhall', 'storehouse', 'woodcutter', 'forager', 'quarry', 'sawmill', 'farmhouse', 'mill', 'bakery', 'chapel', 'tavern'], 0),
-    place(['fishery', 'hunter', 'herbalist', 'sheepfarm', 'ironmine', 'weaver', 'blacksmith', 'infirmary', 'market'], 26),
+    place(['fishery', 'hunter', 'herbalist', 'forester', 'sheepfarm', 'ironmine', 'weaver', 'blacksmith', 'infirmary', 'market'], 26),
   );
   // row B: houses, levels 1-5 x 3 seeds
   for (let l = 1; l <= 5; l++) {

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hamlet big-map demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; font-family: -apple-system, "Thonburi", sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 10px; bottom: 10px; color: #fff; font-size: 12px; background: #000a; padding: 5px 10px; border-radius: 6px; line-height: 1.5; pointer-events: none; white-space: pre; }
+  #topbar { position: fixed; top: 8px; left: 8px; height: 28px; width: 200px; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="topbar"></div>
+<div id="hud"></div>
+<script type="module" src="./bigmap-demo.js"></script>
+</body>
+</html>

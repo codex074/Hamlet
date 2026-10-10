@@ -19,8 +19,8 @@ const sceneApi = createScene(canvas);
 const { renderer, scene, camera } = sceneApi;
 
 const seed = +(q.get('seed') || 1);
-const terrain = generateTerrain(seed);
-const nodes = generateNodes(seed, terrain);
+const terrain = generateTerrain(seed, { mapSize: 'small' });
+const nodes = generateNodes(seed, terrain, { mapSize: 'small' });
 
 // ---- fake game state: a few buildings, one field, a trodden path
 const state = { nodes, buildings: [], zones: [], wear: new Float32Array(GRID * GRID) };

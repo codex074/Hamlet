@@ -18,7 +18,7 @@ const hud = document.getElementById('hud');
 
 const sceneApi = createScene(canvas);
 const { renderer, scene, camera } = sceneApi;
-const terrain = generateTerrain(+(q.get('seed') || 1));
+const terrain = generateTerrain(+(q.get('seed') || 1), { mapSize: 'small' });
 const terrainView = createTerrainMesh(terrain);
 scene.add(terrainView.mesh, terrainView.water);
 

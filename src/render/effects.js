@@ -2,8 +2,8 @@
 // Billboards are instanced camera-facing quads (no gl_PointSize limits), soft procedural puff texture.
 // Node-safe: nothing here touches `document` or WebGL until a renderer actually draws the meshes.
 import * as THREE from '../../vendor/three.module.js';
-import { WORLD_SIZE } from '../config.js';
 import { mulberry32 } from '../rng.js';
+import { getGraphics, onGraphicsChange } from './graphics.js';
 
 const MAX_PUFFS = 600;
 const PER_SOURCE = 10;
@@ -120,6 +120,14 @@ export function createSmoke(parent) {
   const bb = makeBillboards(MAX_PUFFS, { color: 0xc4c1bc });
   bb.mesh.name = 'smoke';
   parent.add(bb.mesh);
+  // graphics setting 'effects' (live): off hides the billboards and skips the simulation
+  let enabled = getGraphics().effects;
+  bb.mesh.visible = enabled;
+  const offGfx = onGraphicsChange((g) => {
+    enabled = g.effects;
+    bb.mesh.visible = enabled;
+    if (!enabled) { n = 0; bb.geo.instanceCount = 0; }
+  });
 
   const rand = mulberry32(31337);
   // live puffs, structure-of-arrays
@@ -165,6 +173,7 @@ export function createSmoke(parent) {
   }
 
   function update(dt, isNight) {
+    if (!enabled) return;
     time += dt;
     nightMix += ((isNight ? 1 : 0) - nightMix) * Math.min(1, dt * 0.6);
     bb.mat.uniforms.uColor.value.copy(day).lerp(night, nightMix);
@@ -216,6 +225,7 @@ export function createSmoke(parent) {
   }
 
   function dispose() {
+    offGfx();
     parent.remove(bb.mesh);
     bb.geo.dispose();
     bb.mat.dispose();
@@ -238,6 +248,13 @@ export function createFireflies(parent, opts = {}) {
   const bb = makeBillboards(count, { color: 0xd9ff7a, additive: true, uShade: 0 });
   bb.mesh.name = 'fireflies';
   parent.add(bb.mesh);
+  let enabled = getGraphics().effects;
+  bb.mesh.visible = enabled;
+  const offGfx = onGraphicsChange((g) => {
+    enabled = g.effects;
+    bb.mesh.visible = enabled;
+    if (!enabled) bb.geo.instanceCount = 0;
+  });
 
   const rand = mulberry32(8080);
   const fx = new Float32Array(count);
@@ -248,7 +265,7 @@ export function createFireflies(parent, opts = {}) {
   let init = false;
   let nightMix = 0;
   let time = 0;
-  const focusV = new THREE.Vector3(WORLD_SIZE / 2, 0, WORLD_SIZE / 2);
+  const focusV = new THREE.Vector3(opts.center || 120, 0, opts.center || 120);
 
   function respawn(i, cx, cz, ring) {
     const a = rand() * Math.PI * 2;
@@ -261,6 +278,7 @@ export function createFireflies(parent, opts = {}) {
   }
 
   function update(dt, isNight, focus) {
+    if (!enabled) return;
     time += dt;
     if (focus) focusV.copy(focus);
     if (!init) { for (let i = 0; i < count; i++) respawn(i, focusV.x, focusV.z, false); init = true; }
@@ -290,6 +308,7 @@ export function createFireflies(parent, opts = {}) {
   }
 
   function dispose() {
+    offGfx();
     parent.remove(bb.mesh);
     bb.geo.dispose();
     bb.mat.dispose();

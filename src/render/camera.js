@@ -1,9 +1,11 @@
 // RTS camera: orbits `target`, pans on the ground plane, zooms by changing distance.
 import * as THREE from '../../vendor/three.module.js';
-import { WORLD_SIZE, SPAWN } from '../config.js';
+import { WORLD_SIZE } from '../config.js';
+import { getViewWorldSize } from './viewworld.js';
 
 const DIST_MIN = 15;
-const DIST_MAX = 160;
+const DIST_MAX_SMALL = 160;
+const DIST_MAX_BIG = 220;   // maps larger than 300 m can zoom out further
 const PITCH_NEAR = 0.55;
 const PITCH_FAR = 1.1;
 const DRAG_THRESHOLD = 4; // px before a left-button pan counts as a drag
@@ -16,18 +18,31 @@ function isTyping(el) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true;
 }
 
-export function createCameraController(camera, domElement, getGroundHeight) {
-  const target = new THREE.Vector3(SPAWN.x, getGroundHeight(SPAWN.x, SPAWN.z), SPAWN.z);
+// `world` (optional 4th argument, or setWorld() later): the terrain object ({ size }) or a plain size in metres.
+// The pan target is clamped to [0, size]. Without it the size published by createTerrainMesh() is used
+// (see viewworld.js), and finally the small-map default (WORLD_SIZE).
+export function createCameraController(camera, domElement, getGroundHeight, world) {
+  let explicitSize = null;
+  const worldSize = () => explicitSize || getViewWorldSize() || WORLD_SIZE;
+  const distMax = () => (worldSize() > 300 ? DIST_MAX_BIG : DIST_MAX_SMALL);   // big maps can zoom out further
+  function setWorld(w) {
+    const size = typeof w === 'number' ? w : w && w.size;
+    explicitSize = size > 0 ? size : null;
+    distGoal = Math.min(distGoal, distMax());
+  }
+  const target = new THREE.Vector3();
   let yaw = 0.6;
   let dist = 70;
   let distGoal = 70;
+  if (world !== undefined) setWorld(world);
+  target.set(worldSize() / 2, getGroundHeight(worldSize() / 2, worldSize() / 2), worldSize() / 2);
   let panLeft = false;
   let drag = null;       // { mode:'rotate'|'pan', x, y, moved }
   let lastDragMoved = false;
   const keys = new Set();
 
   const pitchFor = (d) => {
-    const t = clamp((d - DIST_MIN) / (DIST_MAX - DIST_MIN), 0, 1);
+    const t = clamp((d - DIST_MIN) / (distMax() - DIST_MIN), 0, 1);
     return PITCH_NEAR + (PITCH_FAR - PITCH_NEAR) * t;
   };
 
@@ -36,8 +51,8 @@ export function createCameraController(camera, domElement, getGroundHeight) {
   const right = () => ({ x: Math.cos(yaw), z: -Math.sin(yaw) });
 
   function moveTarget(dx, dz) {
-    target.x = clamp(target.x + dx, 0, WORLD_SIZE);
-    target.z = clamp(target.z + dz, 0, WORLD_SIZE);
+    target.x = clamp(target.x + dx, 0, worldSize());
+    target.z = clamp(target.z + dz, 0, worldSize());
   }
 
   // ---- input handlers
@@ -56,7 +71,7 @@ export function createCameraController(camera, domElement, getGroundHeight) {
     e.preventDefault();
     let dy = e.deltaY;
     if (e.deltaMode === 1) dy *= 33;
-    distGoal = clamp(distGoal * Math.exp(dy * 0.0012), DIST_MIN, DIST_MAX);
+    distGoal = clamp(distGoal * Math.exp(dy * 0.0012), DIST_MIN, distMax());
   };
 
   const onMouseDown = (e) => {
@@ -159,6 +174,7 @@ export function createCameraController(camera, domElement, getGroundHeight) {
     target,
     update,
     dispose,
+    setWorld(w) { setWorld(w); moveTarget(0, 0); },
     setPanWithLeftMouse(v) { panLeft = !!v; },
     // True if the last left-button press turned into a pan drag (so main can ignore the click).
     wasDragged() { return lastDragMoved; },
