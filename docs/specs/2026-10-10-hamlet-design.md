@@ -17,7 +17,7 @@
 - สำเนาพัฒนา: MacBook Air `~/Desktop/My-Web-App/hamlet` → `git push` ไป Mac mini
 - ไม่มี build step: vanilla ES modules + `vendor/three.module.js` (three@0.169.0) เก็บใน repo ⇒ เล่น offline ได้
 - รัน: `./serve.sh` (`python3 -m http.server 8080`) บน Mac mini → เล่นที่ Mac mini `localhost:8080` หรือจาก MacBook ผ่าน Tailscale `http://100.64.194.122:8080`
-- เทสต์: `node --test tests/` (Node 24 บน MacBook) ทดสอบเฉพาะโมดูล sim ที่ไม่พึ่ง DOM/three
+- เทสต์: `npm test` (Node 24 บน MacBook) ทดสอบเฉพาะโมดูล sim ที่ไม่พึ่ง DOM/three
 
 ## 3. โครงสร้างโค้ด
 
