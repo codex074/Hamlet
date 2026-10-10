@@ -10,8 +10,9 @@ export const SPAWN_CLEAR_RADIUS = 25;
 export const EDGE_MARGIN = 4;
 export const MAX_SLOPE = 2.5;           // max height difference under a footprint
 
-export const NODE_COUNTS = { tree: 900, rock: 40, berry: 60 };
-export const NODE_AMOUNT = { tree: 4, rock: 60, berry: 12 };
+export const NODE_COUNTS = { tree: 900, rock: 40, berry: 60, ore: 14 };
+export const NODE_AMOUNT = { tree: 4, rock: 60, berry: 12, ore: 80 };
+export const ORE_MIN_HEIGHT = 0.5;      // ore veins only where height >= this fraction of MAX_HEIGHT
 export const BERRY_REGROW_PER_SEC = 1 / 20; // berries regrow per bush per second
 
 export const DAY_LENGTH = 240;          // seconds of game time per day
@@ -32,8 +33,9 @@ export const FIELD_RADIUS = 30;
 export const SERVICE_STAFFED_DIST = 6;
 export const IDLE_WANDER_RADIUS = 10;
 
-export const RESOURCES = ['wood', 'planks', 'stone', 'berries', 'wheat', 'flour', 'bread'];
-export const FOODS = ['bread', 'berries'];   // preference order when eating
+export const RESOURCES = ['wood', 'planks', 'stone', 'berries', 'wheat', 'flour', 'bread',
+  'fish', 'meat', 'wool', 'cloth', 'herbs', 'ore', 'tools'];
+export const FOODS = ['bread', 'meat', 'fish', 'berries'];   // preference order when eating (rotates for variety)
 
 export const RESOURCE_INFO = {
   wood:    { name: 'ไม้ซุง',     icon: '🪵' },
@@ -43,10 +45,17 @@ export const RESOURCE_INFO = {
   wheat:   { name: 'ข้าวสาลี',   icon: '🌾' },
   flour:   { name: 'แป้ง',       icon: '🥣' },
   bread:   { name: 'ขนมปัง',     icon: '🍞' },
+  fish:    { name: 'ปลา',        icon: '🐟' },
+  meat:    { name: 'เนื้อ',       icon: '🍖' },
+  wool:    { name: 'ขนแกะ',      icon: '🧶' },
+  cloth:   { name: 'ผ้า',         icon: '🧣' },
+  herbs:   { name: 'สมุนไพร',    icon: '🌿' },
+  ore:     { name: 'แร่เหล็ก',    icon: '⛰️' },
+  tools:   { name: 'เครื่องมือ',   icon: '🔧' },
   gold:    { name: 'ทอง',        icon: '🪙' },
 };
 
-// job kinds: 'gather' | 'farm' | 'process' | 'service' | null
+// job kinds: 'gather' | 'farm' | 'process' | 'service' | 'fish' | 'ranch' | 'hunt' | 'doctor' | 'market' | null
 export const BUILDINGS = {
   townhall:   { name: 'ศาลากลาง', category: null, radius: 6, cost: {}, buildTime: 0,
                 storage: true, workers: 0, job: null, unlockPop: 0 },
@@ -70,6 +79,24 @@ export const BUILDINGS = {
                 workers: 1, job: 'service', service: 'religion', serviceRadius: 45, unlockPop: 6 },
   tavern:     { name: 'โรงเตี๊ยม', category: 'service', radius: 5, cost: { planks: 15, stone: 8 }, buildTime: 40,
                 workers: 1, job: 'service', service: 'entertainment', serviceRadius: 45, unlockPop: 20 },
+  fishery:    { name: 'ท่าประมง', category: 'resource', radius: 4, cost: { wood: 10 }, buildTime: 20,
+                workers: 2, job: 'fish', output: { fish: 2 }, time: 10, unlockPop: 10, nearWater: true },
+  hunter:     { name: 'กระท่อมนักล่า', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
+                workers: 1, job: 'hunt', output: { meat: 3 }, time: 4, unlockPop: 8 },
+  herbalist:  { name: 'คนเก็บสมุนไพร', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
+                workers: 1, job: 'gather', node: 'tree', keepNode: true, output: { herbs: 1 }, time: 7, unlockPop: 10 },
+  sheepfarm:  { name: 'คอกแกะ', category: 'resource', radius: 7, cost: { wood: 15, planks: 6 }, buildTime: 35,
+                workers: 2, job: 'ranch', outputs: [{ meat: 2 }, { wool: 2 }], time: 9, unlockPop: 15 },
+  ironmine:   { name: 'เหมืองแร่เหล็ก', category: 'resource', radius: 4.5, cost: { wood: 15, planks: 8 }, buildTime: 35,
+                workers: 2, job: 'gather', node: 'ore', output: { ore: 2 }, time: 10, unlockPop: 25 },
+  weaver:     { name: 'ช่างทอผ้า', category: 'production', radius: 4, cost: { planks: 12, stone: 4 }, buildTime: 30,
+                workers: 1, job: 'process', input: { wool: 2 }, output: { cloth: 1 }, time: 8, unlockPop: 20 },
+  blacksmith: { name: 'โรงตีเหล็ก', category: 'production', radius: 4.5, cost: { planks: 10, stone: 12 }, buildTime: 40,
+                workers: 1, job: 'process', input: { ore: 2 }, output: { tools: 1 }, time: 10, unlockPop: 25 },
+  infirmary:  { name: 'สถานพยาบาล', category: 'service', radius: 5, cost: { planks: 12, stone: 10 }, buildTime: 40,
+                workers: 2, job: 'doctor', service: 'health', serviceRadius: 50, supply: 'herbs', unlockPop: 15 },
+  market:     { name: 'ตลาด', category: 'service', radius: 6, cost: { planks: 15, stone: 6 }, buildTime: 40,
+                workers: 2, job: 'market', service: 'clothing', serviceRadius: 50, supply: 'cloth', unlockPop: 20 },
   cathedral:  { name: 'มหาวิหาร', category: 'monument', radius: 11, cost: {}, buildTime: 0,
                 workers: 0, job: null, unlockPop: 25, monument: true },
   house:      { name: 'บ้าน', category: null, radius: 3, cost: { wood: 6 }, buildTime: 12,
@@ -83,17 +110,25 @@ export const CATHEDRAL_STAGES = [
   { name: 'ยอดแหลมและกระจกสี', cost: { stone: 30, planks: 20 }, gold: 300,   buildTime: 40 },
 ];
 
-// House levels (index = level - 1). needs: subset of 'food' | 'bread' | 'religion' | 'entertainment' | 'cathedral'
+// House levels (index = level - 1).
+// needs: 'food' | 'variety2' | 'variety3' | 'religion' | 'entertainment' | 'health' | 'clothing' | 'cathedral'
 export const HOUSE_LEVELS = [
-  { level: 1, name: 'ผู้มาใหม่', needs: ['food'],                                              capacity: 3, tax: 1, upgradeCost: null },
-  { level: 2, name: 'ไพร่',     needs: ['food', 'religion'],                                  capacity: 4, tax: 2, upgradeCost: { planks: 6 } },
-  { level: 3, name: 'สามัญชน',  needs: ['food', 'bread', 'religion', 'entertainment'],        capacity: 5, tax: 4, upgradeCost: { stone: 8, planks: 6 } },
-  { level: 4, name: 'ชาวเมือง', needs: ['food', 'bread', 'religion', 'entertainment', 'cathedral'], capacity: 6, tax: 7, upgradeCost: { stone: 12, planks: 8 } },
+  { level: 1, name: 'ผู้มาใหม่', needs: ['food'], capacity: 3, tax: 1, upgradeCost: null },
+  { level: 2, name: 'ไพร่', needs: ['food', 'religion'], capacity: 4, tax: 2, upgradeCost: { planks: 6 } },
+  { level: 3, name: 'สามัญชน', needs: ['food', 'variety2', 'religion', 'entertainment', 'health'],
+    capacity: 5, tax: 4, upgradeCost: { stone: 8, planks: 6 } },
+  { level: 4, name: 'ชาวเมือง', needs: ['food', 'variety3', 'religion', 'entertainment', 'health', 'clothing'],
+    capacity: 6, tax: 7, upgradeCost: { stone: 12, planks: 8 } },
+  { level: 5, name: 'ขุนนาง', needs: ['food', 'variety3', 'religion', 'entertainment', 'health', 'clothing', 'cathedral'],
+    capacity: 7, tax: 12, upgradeCost: { stone: 20, planks: 12, tools: 4 } },
 ];
 
 export const NEED_INFO = {
   food:          'อาหาร',
-  bread:         'ขนมปัง',
+  variety2:      'อาหาร 2 ชนิด',
+  variety3:      'อาหาร 3 ชนิด',
+  health:        'สุขภาพ',
+  clothing:      'เสื้อผ้า',
   religion:      'ศาสนา',
   entertainment: 'ความบันเทิง',
   cathedral:     'มหาวิหาร',
@@ -111,6 +146,30 @@ export const START = {
   stock: { wood: 60, stone: 10, berries: 40 },
   gold: 0,
 };
+
+// Sickness
+export const SICK_CHANCE_PER_DAY = 0.04;    // base chance per villager per midnight
+export const SICK_HUNGRY_MUL = 2.5;         // if the villager starved that day
+export const SICK_COVERED_MUL = 0.4;        // if their house has health coverage
+export const SICK_LEAVE_DAYS = 3;           // untreated sick villagers leave after this many midnights
+export const SICK_SPEED_MUL = 0.6;
+export const HEAL_TIME = 6;                 // seconds a doctor spends treating
+// Services that hold a supply (infirmary: herbs, market: cloth)
+export const SUPPLY_MAX = 10;               // stock a service building keeps on hand
+export const CLOTH_PER_HOUSE_PER_DAY = 0.5; // consumed from the covering market at midnight
+export const HERBS_PER_HEAL = 1;
+// Tools
+export const TOOL_SPEED_BONUS = 0.3;        // work-time reduction share for 'tooled' buildings
+export const TOOLS_PER_BUILDING_PER_DAY = 1;
+// Fishing / hunting / ranching
+export const FISH_RADIUS = 25;              // fishers look for shore spots this close to the fishery
+export const NEAR_WATER_DIST = 8;           // fishery must have water within radius + this
+export const HUNT_RADIUS = 60;
+export const HUNT_SHOT_DIST = 6;
+export const DEER_COUNT = 24;
+export const DEER_RESPAWN_SEC = 90;
+export const DEER_SPEED = 1.4;
+export const UPGRADE_BUILD_TIME = 8;
 
 export const ZONE_BRUSH = { min: 6, max: 14, default: 9 };
 export const HOUSE_SITE_TRIES = 30;

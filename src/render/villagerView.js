@@ -3,13 +3,15 @@
 import * as THREE from '../../vendor/three.module.js';
 import { heightAt } from '../terrain.js';
 import {
-  PIVOTS, LOOKS, JOB_ROLE, CARRY_KINDS, buildCharacter, buildCarry, characterMaterial, poseAngles,
+  PIVOTS, LOOKS, JOB_ROLE, CARRY_KINDS, buildCharacter, buildCarry, characterMaterial, poseAngles, workPoseOf,
 } from './characters.js';
 
 const SCALE = 1.2;               // characters are life-size; scale up a touch for readability
 const START_CAP = 16;
 const PARTS = ['torso', 'head', 'armL', 'armR', 'legL', 'legR', 'item'];
-const WORK_TASKS = new Set(['gather', 'produce', 'build', 'staff']);
+const WORK_TASKS = new Set(['gather', 'produce', 'build', 'staff', 'hunt', 'heal']);
+const SICK_TINT = new THREE.Color(0.78, 0.95, 0.72);   // pale, slightly green face
+const WHITE = new THREE.Color(1, 1, 1);
 const STRIDE = 4.6;              // walk-cycle radians per metre
 
 function hash(id, k) {
@@ -103,7 +105,7 @@ export function createVillagerView(parent) {
   const ONE = new THREE.Vector3(1, 1, 1);
 
   function put(mesh, i, pivot, rx, rz, extraY = 0) {
-    e.set(rx, 0, rz);
+    e.set(rx, 0, rz, 'XYZ');
     q.setFromEuler(e);
     local.compose(p.set(pivot[0], pivot[1] + extraY, pivot[2]), q, ONE);
     out.multiplyMatrices(base, local);
@@ -136,27 +138,32 @@ export function createVillagerView(parent) {
 
       const task = v.queue && v.queue[0] ? v.queue[0].kind : null;
       const carrying = !!v.carry;
+      const role = roleOf(v, byId);
       let kind = 'idle';
       let phase = time * 1.0 + v.id;
-      if (m.moving > 0.5) { kind = 'walk'; phase = m.phase; }
-      else if (!carrying && WORK_TASKS.has(task) && task !== 'staff') { kind = 'work'; phase = time * 5 + v.id; }
+      if (v.sick) { kind = 'sick'; phase = m.phase; }
+      else if (m.moving > 0.5) { kind = 'walk'; phase = m.phase; }
+      else if (!carrying && WORK_TASKS.has(task) && task !== 'staff') {
+        kind = role === 'builder' ? 'chop' : workPoseOf(role);
+        phase = time * (kind === 'chop' ? 5 : 2) + v.id;
+      }
       const a = poseAngles(kind, phase, carrying);
 
       const sc = SCALE * (0.92 + hash(v.id, 3) * 0.16);
-      e.set(0, m.yaw, 0);
+      e.set(v.sick ? 0.22 : 0, m.yaw, 0, 'YXZ');   // sick villagers walk hunched
       q.setFromEuler(e);
       base.compose(p.set(v.x, heightAt(state.terrain, v.x, v.z) + a.bob, v.z), q, s.set(sc, sc, sc));
 
-      const role = roleOf(v, byId);
       const look = Math.floor(hash(v.id, 4) * LOOKS.length);
       const vb = variant(role, look);
       const i = vb.n++;
       const M = vb.meshes;
       put(M.torso, i, [0, 0, 0], 0, 0);
-      e.set(0, a.head, 0); q.setFromEuler(e);
+      e.set(0, a.head, 0, 'XYZ'); q.setFromEuler(e);
       local.compose(p.set(...PIVOTS.neck), q, ONE);
       out.multiplyMatrices(base, local);
       M.head.setMatrixAt(i, out);
+      M.head.setColorAt(i, v.sick ? SICK_TINT : WHITE);
       put(M.legL, i, PIVOTS.hipL, a.legL, 0);
       put(M.legR, i, PIVOTS.hipR, a.legR, 0);
       put(M.armL, i, PIVOTS.shoulderL, a.armL, a.armLz);
@@ -168,7 +175,7 @@ export function createVillagerView(parent) {
           M.item.setMatrixAt(i, out);
         } else {
           // item follows the right arm: arm transform × hand offset
-          e.set(a.armR, 0, a.armRz); q.setFromEuler(e);
+          e.set(a.armR, 0, a.armRz, 'XYZ'); q.setFromEuler(e);
           local.compose(p.set(...PIVOTS.shoulderR), q, ONE);
           out.multiplyMatrices(base, local);
           local.makeTranslation(...PIVOTS.hand);
@@ -189,6 +196,7 @@ export function createVillagerView(parent) {
         mesh.count = v.n;
         mesh.visible = v.n > 0;
         mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
     }
     for (const c of carries.values()) {

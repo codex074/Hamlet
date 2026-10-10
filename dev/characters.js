@@ -1,8 +1,8 @@
 // Turntable gallery of every character in src/render/characters.js.
 // ?pose=walk|work|idle  ?look=N (all roles in one look)  ?looks=1 (one role in every look, ?role=key)
-// ?carry=1 (show every carried good)
+// ?carry=1 (show every carried good)  ?set=new|old (subset of roles)
 import * as THREE from '../vendor/three.module.js';
-import { ROLES, LOOKS, CARRY_KINDS, makeCharacterGroup, applyPose } from '../src/render/characters.js';
+import { ROLES, LOOKS, CARRY_KINDS, makeCharacterGroup, applyPose, workPoseOf } from '../src/render/characters.js';
 
 const params = new URLSearchParams(location.search);
 const pose = params.get('pose') || 'idle';
@@ -41,17 +41,20 @@ if (params.get('looks')) {
 } else if (params.get('carry')) {
   entries = CARRY_KINDS.map((res, i) => ({ role: 'villager', look: i, carry: res }));
 } else {
-  entries = Object.keys(ROLES).map((role) => ({ role, look, carry: null }));
+  const NEW = ['fisher', 'hunter', 'herbalist', 'shepherd', 'miner', 'weaver', 'blacksmith', 'doctor', 'merchant'];
+  const keys = params.get('set') === 'new' ? NEW : params.get('set') === 'old' ? Object.keys(ROLES).filter((k) => !NEW.includes(k)) : Object.keys(ROLES);
+  entries = keys.map((role) => ({ role, look, carry: null }));
 }
 
 const SPACING = 1.25;
 const chars = entries.map((e, i) => {
+  const workKind = workPoseOf(e.role);
   const g = makeCharacterGroup(e.role, e.look, e.carry);
   const root = new THREE.Group();
   root.position.x = (i - (entries.length - 1) / 2) * SPACING;
   root.add(g);
   scene.add(root);
-  return { root, g, label: e.carry ? e.carry : g.userData.name };
+  return { root, g, workKind, label: e.carry ? e.carry : g.userData.name };
 });
 
 const labels = document.getElementById('labels');
@@ -80,7 +83,8 @@ function frame() {
   camera.position.set(Math.sin(yaw) * dist, 1.3 + dist * 0.1, Math.cos(yaw) * dist);
   camera.lookAt(0, 0.95, 0);
   chars.forEach((c, i) => {
-    applyPose(c.g, c.g.userData.carrying ? 'walk' : pose, (pose === 'work' ? t * 5 : t * 7) + i);
+    const kind = c.g.userData.carrying ? 'walk' : pose === 'work' ? c.workKind : pose;
+    applyPose(c.g, kind, (pose === 'work' ? (kind === 'chop' ? t * 5 : t * 2) : t * 7) + i);
     _v.set(c.root.position.x, 2.2, 0).project(camera);
     labelEls[i].style.left = `${(_v.x * 0.5 + 0.5) * innerWidth}px`;
     labelEls[i].style.top = `${(-_v.y * 0.5 + 0.5) * innerHeight}px`;
