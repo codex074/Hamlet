@@ -2,7 +2,22 @@
 
 เกมสร้างหมู่บ้านยุคกลางแบบ 3D แนว Foundation เล่นบนเบราว์เซอร์ (Safari/Chrome) ไม่ต้องติดตั้งอะไรเพิ่ม และเล่นแบบออฟไลน์ได้
 
-## วิธีเล่น
+## เล่นออนไลน์
+
+https://hamlet.codex074.com — สมัครด้วยอีเมล/รหัสผ่าน หรือ Google · มีหมู่บ้านได้ 3 แห่งต่อบัญชี · เซฟเก็บบนเซิร์ฟเวอร์
+
+## Deploy (Hostinger VPS)
+
+```bash
+./deploy.sh
+```
+รันเทสต์ → อัปโหลดไป `/srv/hamlet/app` → `docker compose up -d --build` → health check
+- server: Node 24 ไม่มี dependency (`server/`), SQLite ที่ `/srv/hamlet/data` (สำรองรายวันใน `backups/` เก็บ 14 วัน)
+- ตั้งค่า: `/srv/hamlet/hamlet.env` (`GOOGLE_CLIENT_ID=...`)
+- nginx: `/etc/nginx/sites-available/hamlet.codex074.com` (ต้นฉบับใน `deploy/`, certbot เพิ่ม TLS ให้แล้ว ต่ออายุอัตโนมัติ)
+- log: `ssh hostinger 'docker logs hamlet-server --tail 100'`
+
+## วิธีเล่น (เครื่องตัวเอง แบบออฟไลน์)
 
 ```bash
 cd ~/Documents/Hamlet && ./serve.sh
