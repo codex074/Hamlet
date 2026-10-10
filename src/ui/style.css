@@ -325,6 +325,29 @@ button {
 .btn.primary:hover { background: #e6b55a; }
 .btn.danger { background: #a8442f; border-color: #c9573f; }
 
+/* ---------- guide ---------- */
+.modal-box.guide { max-width: 860px; height: min(640px, calc(100vh - 32px)); display: flex; flex-direction: column; }
+.guide-body { display: flex; gap: 14px; flex: 1; min-height: 0; }
+.guide-tabs { display: flex; flex-direction: column; gap: 4px; flex: 0 0 150px; }
+.guide-tabs button {
+  text-align: left; padding: 7px 10px; border-radius: 8px;
+  background: rgba(243, 230, 200, 0.06); border: 1px solid transparent; color: var(--parch-dim);
+}
+.guide-tabs button:hover { background: rgba(243, 230, 200, 0.14); color: var(--parch); }
+.guide-tabs button.active { background: rgba(217, 164, 65, 0.22); border-color: var(--gold-soft); color: var(--parch); font-weight: 700; }
+.guide-page { flex: 1; overflow-y: auto; padding-right: 6px; min-width: 0; }
+.guide-page h3:first-child { margin-top: 0; }
+.guide-page ul, .guide-page ol { margin: 4px 0 8px; padding-left: 22px; }
+.guide-page .dim { color: var(--parch-dim); font-size: 0.92em; }
+.guide-page .ctrls { grid-template-columns: max-content 1fr; gap: 6px 14px; }
+.gt { width: 100%; border-collapse: collapse; margin: 6px 0 8px; font-size: 0.93em; }
+.gt th { text-align: left; color: var(--gold); font-weight: 600; border-bottom: 1px solid var(--gold-soft); padding: 4px 6px; }
+.gt td { padding: 4px 6px; border-bottom: 1px solid rgba(243, 230, 200, 0.1); vertical-align: top; }
+@media (max-width: 700px) {
+  .guide-body { flex-direction: column; }
+  .guide-tabs { flex-direction: row; flex-wrap: wrap; flex-basis: auto; }
+}
+
 /* ---------- narrower windows ---------- */
 @media (max-width: 1100px) {
   body { font-size: 13px; }

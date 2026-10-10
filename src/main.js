@@ -10,6 +10,7 @@ import { heightAt } from './terrain.js';
 import { SPAWN } from './config.js';
 import { createHUD } from './ui/hud.js';
 import { createTools } from './ui/tools.js';
+import { GUIDE } from './ui/guide.js';
 
 const loadingEl = document.getElementById('loading');
 const canvas = document.getElementById('game');
@@ -178,33 +179,35 @@ function boot() {
     const back = document.createElement('div');
     back.className = 'backdrop';
     back.innerHTML = `
-      <div class="modal-box">
-        <h2>ยินดีต้อนรับสู่ Hamlet</h2>
-        <p>สร้างหมู่บ้านยุคกลางของคุณให้เติบโต</p>
-        <h3>การควบคุม</h3>
-        <div class="ctrls">
-          <b>เลื่อน</b><span>WASD / ลากเมาส์ซ้าย</span>
-          <b>หมุน</b><span>Q/E / คลิกขวาลาก</span>
-          <b>ซูม</b><span>ล้อเมาส์</span>
-          <b>หมุนอาคาร</b><span>R</span>
-          <b>ยกเลิก</b><span>Esc</span>
-          <b>หยุด</b><span>Space</span>
+      <div class="modal-box guide">
+        <h2>วิธีเล่น Hamlet</h2>
+        <div class="guide-body">
+          <nav class="guide-tabs">${GUIDE.map((g) => `<button type="button" data-id="${g.id}">${g.title}</button>`).join('')}</nav>
+          <section class="guide-page"></section>
         </div>
-        <h3>เป้าหมาย</h3>
-        <ol>
-          <li>ระบายโซนที่อยู่อาศัย</li>
-          <li>สร้างคนตัดไม้ / คนเก็บของป่า</li>
-          <li>ทำให้ชาวบ้านมีความสุขเพื่อให้หมู่บ้านเติบโต</li>
-        </ol>
-        <div class="modal-actions"><button class="btn primary" type="button">เริ่มเล่น</button></div>
+        <div class="modal-actions"><button class="btn primary close" type="button">${firstRun ? 'เริ่มเล่น' : 'ปิด'}</button></div>
       </div>`;
-    const btn = back.querySelector('button');
-    btn.addEventListener('click', () => {
+    const page = back.querySelector('.guide-page');
+    const tabs = back.querySelectorAll('.guide-tabs button');
+    const open = (id) => {
+      const g = GUIDE.find((x) => x.id === id) || GUIDE[0];
+      page.innerHTML = g.html;
+      page.scrollTop = 0;
+      tabs.forEach((t) => t.classList.toggle('active', t.dataset.id === g.id));
+    };
+    tabs.forEach((t) => t.addEventListener('click', () => open(t.dataset.id)));
+    open('start');
+    const close = () => {
       back.remove();
+      window.removeEventListener('keydown', onKey, true);
       helpOpen = false;
       markHelpSeen();
       if (firstRun && speed === 0) setSpeed(resumeSpeed || 1);
-    });
+    };
+    const onKey = (e) => { if (e.code === 'Escape') { e.stopPropagation(); close(); } };
+    window.addEventListener('keydown', onKey, true);
+    back.querySelector('.close').addEventListener('click', close);
+    back.addEventListener('click', (e) => { if (e.target === back) close(); });
     document.body.appendChild(back);
   }
   if (!helpSeen()) showHelp(true);
