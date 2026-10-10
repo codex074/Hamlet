@@ -353,6 +353,12 @@ export function createHUD(root, handlers = {}) {
   for (const t of TAB_DEFS) {
     const tb = makeTab(t.id, t.label);
     const panel = el('div', 'items');
+    // a vertical mouse wheel scrolls the building row sideways
+    panel.addEventListener('wheel', (e) => {
+      if (panel.scrollWidth <= panel.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      panel.scrollLeft += e.deltaY;
+    }, { passive: false });
     panels[t.id] = panel;
     buildbar.appendChild(panel);
     tb.addEventListener('click', () => { openTab = openTab === t.id ? null : t.id; renderTabs(); hideTip(); });

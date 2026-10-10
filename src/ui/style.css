@@ -212,15 +212,19 @@ button {
   bottom: var(--edge-b);
   left: 50%;
   transform: translateX(-50%);
-  width: max-content;
-  max-width: calc(100vw - 2 * (var(--info-w) + 18px));
+  /* fixed width: the bar keeps the same size on every tab; extra buildings scroll sideways */
+  width: min(980px, calc(100vw - 2 * (var(--info-w) + 18px)));
   min-width: 320px;
   padding: 6px;
   z-index: 10;
 }
-#buildbar .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+#buildbar .tabs { display: flex; gap: 4px; flex-wrap: nowrap; }
 #buildbar .tab {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
   padding: 6px 12px;
   background: rgba(243, 230, 200, 0.07);
   border: 1px solid transparent;
@@ -234,17 +238,26 @@ button {
 #buildbar .tab.demolish.active { background: rgba(229, 101, 79, 0.45); border-color: var(--bad); }
 #buildbar .items {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
   gap: 5px;
   margin-top: 6px;
-  max-height: min(300px, 42vh);
-  max-height: min(300px, 42dvh);
-  overflow-y: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 2px;
+  scroll-snap-type: x proximity;
+  scroll-behavior: smooth;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(217, 164, 65, 0.45) transparent;
 }
+#buildbar .items::-webkit-scrollbar { height: 6px; }
+#buildbar .items::-webkit-scrollbar-thumb { background: rgba(217, 164, 65, 0.45); border-radius: 3px; }
+#buildbar .items .bbtn { scroll-snap-align: start; }
+/* centre the row when everything fits; start-aligned and scrollable when it does not */
+#buildbar .items .bbtn:first-child { margin-left: auto; }
+#buildbar .items .bbtn:last-child { margin-right: auto; }
 #buildbar .items[hidden] { display: none; }
 .bbtn {
   flex: 0 0 auto;
