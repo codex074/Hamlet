@@ -2,24 +2,23 @@
 import {
   DAY_LENGTH, NIGHT_START, NIGHT_END, BUILDINGS, HOUSE_LEVELS, SERVICE_STAFFED_DIST, SPAWN,
   IMMIGRATION_MIN_HAPPINESS, IMMIGRATION_MAX_HOMELESS, LEAVE_HAPPINESS, LEAVE_AFTER_DAYS,
-  WORLD_SIZE, EDGE_MARGIN,
+  WORLD_SIZE, EDGE_MARGIN, FOODS, CLOTH_PER_HOUSE_PER_DAY, TOOLS_PER_BUILDING_PER_DAY,
 } from './config.js';
-import { distance, nearestStorage, addStock, totalStock } from './economy.js';
+import { mulberry32 } from './rng.js';
+import { distance, nearestStorage, addStock, takeStock, totalStock } from './economy.js';
 import { isWater } from './terrain.js';
 import { nodesUnder, findHouseSite } from './placement.js';
-import { createVillager, releaseReservations } from './villagers.js';
+import { createVillager, removeVillager } from './villagers.js';
+import { pushEvent } from './events.js';
+import { startUpgrade, upgradeStatus } from './upgrades.js';
+import { processSickness } from './sickness.js';
 
-const MAX_EVENTS = 20;
+export { pushEvent };
 const NO_ZONE_MESSAGE = 'ระบายโซนที่อยู่อาศัยเพื่อให้ชาวบ้านสร้างบ้าน';
 const UNBUILT_HOUSE_CAPACITY = 3;
 const MAX_UNBUILT_HOUSES = 2;
 const NO_HOUSE_HAPPINESS = 0.6;
 const SPAWN_TRIES = 20;
-
-export function pushEvent(state, text) {
-  state.events.push({ t: state.time, text });
-  while (state.events.length > MAX_EVENTS) state.events.shift();
-}
 
 export function clock(state) {
   const day = Math.floor(state.time / DAY_LENGTH) + 1;
@@ -30,22 +29,31 @@ export function clock(state) {
   return { day, hour, minute, isNight: hour >= NIGHT_START || hour < NIGHT_END };
 }
 
+// Workers stand at the door, so big buildings (market radius 6) need a wider staffing zone.
+function staffedDist(b) {
+  return Math.max(SERVICE_STAFFED_DIST, BUILDINGS[b.type].radius + 1);
+}
+
 function isStaffed(state, b) {
   return b.workers.some((id) => {
     const w = state.villagers.find((v) => v.id === id);
-    if (!w) return false;
+    if (!w || w.sick) return false;
     // workers asleep at home overnight still count as having staffed the building
-    return w.role === 'sleeping' || distance(w.x, w.z, b.x, b.z) <= SERVICE_STAFFED_DIST;
+    return w.role === 'sleeping' || distance(w.x, w.z, b.x, b.z) <= staffedDist(b);
   });
 }
 
+// Built, staffed service building in range (and stocked with its supply, if it needs one).
+function coversHouse(state, house, b, service) {
+  const cfg = BUILDINGS[b.type];
+  return b.built && cfg.service === service
+    && distance(house.x, house.z, b.x, b.z) <= cfg.serviceRadius
+    && (!cfg.supply || (b.stock?.[cfg.supply] ?? 0) > 0)
+    && isStaffed(state, b);
+}
+
 export function serviceCovered(state, house, service) {
-  return state.buildings.some((b) => {
-    const cfg = BUILDINGS[b.type];
-    return b.built && cfg.service === service
-      && distance(house.x, house.z, b.x, b.z) <= cfg.serviceRadius
-      && isStaffed(state, b);
-  });
+  return state.buildings.some((b) => coversHouse(state, house, b, service));
 }
 
 export function cathedralDone(state) {
@@ -54,11 +62,15 @@ export function cathedralDone(state) {
 
 export function evaluateHouse(state, house) {
   const cfg = HOUSE_LEVELS[house.level - 1];
+  const foods = house.foodsToday?.length ?? 0;
   house.needsMet = {
     food: house.residents.length > 0 && !house.starvedToday,
-    bread: house.breadToday === true,
+    variety2: foods >= 2,
+    variety3: foods >= 3,
     religion: serviceCovered(state, house, 'religion'),
     entertainment: serviceCovered(state, house, 'entertainment'),
+    health: serviceCovered(state, house, 'health'),
+    clothing: serviceCovered(state, house, 'clothing'),
     cathedral: cathedralDone(state),
   };
   const met = cfg.needs.filter((k) => house.needsMet[k]).length;
@@ -66,6 +78,13 @@ export function evaluateHouse(state, house) {
 }
 
 // ---------- site creation shared with sim.js ----------
+
+export function emptyNeeds() {
+  return {
+    food: false, variety2: false, variety3: false, religion: false, entertainment: false,
+    health: false, clothing: false, cathedral: false,
+  };
+}
 
 export function newBuilding(state, type, x, z, rot) {
   const cfg = BUILDINGS[type];
@@ -76,10 +95,12 @@ export function newBuilding(state, type, x, z, rot) {
   };
   if (type === 'house') {
     Object.assign(b, {
-      zoneId: null, level: 1, residents: [], upgrading: false, starvedToday: false, breadToday: false,
-      happiness: 1, unhappyDays: 0,
-      needsMet: { food: false, bread: false, religion: false, entertainment: false, cathedral: false },
+      zoneId: null, level: 1, residents: [], upgrading: false, starvedToday: false, foodsToday: [],
+      happiness: 1, unhappyDays: 0, autoUpgrade: true, needsMet: emptyNeeds(),
     });
+  } else {
+    b.tooled = false;
+    if (cfg.job === 'ranch') b.cycle = 0;
   }
   return b;
 }
@@ -105,26 +126,6 @@ function houses(state) {
   return state.buildings.filter((b) => b.type === 'house' && b.built);
 }
 
-function startUpgrade(state, house) {
-  const next = HOUSE_LEVELS[house.level];
-  house.upgrading = true;
-  house.needed = { ...next.upgradeCost };
-  house.incoming = {};
-  house.progress = 0;
-  pushEvent(state, `บ้านกำลังอัปเกรดเป็น${next.name}`);
-}
-
-function removeVillager(state, id) {
-  const i = state.villagers.findIndex((v) => v.id === id);
-  if (i < 0) return;
-  const [v] = state.villagers.splice(i, 1);
-  releaseReservations(state, v);
-  for (const b of state.buildings) {
-    b.workers = b.workers.filter((w) => w !== id);
-    if (b.residents) b.residents = b.residents.filter((r) => r !== id);
-  }
-}
-
 function updateUnhappiness(state, house) {
   if (house.residents.length === 0 || house.happiness >= LEAVE_HAPPINESS) {
     house.unhappyDays = 0;
@@ -137,20 +138,47 @@ function updateUnhappiness(state, house) {
   pushEvent(state, 'ชาวบ้านคนหนึ่งย้ายออกจากหมู่บ้านเพราะไม่พอใจ');
 }
 
-function nextLevelMet(house) {
-  return HOUSE_LEVELS[house.level].needs.every((k) => house.needsMet[k]);
+// Covering market with cloth in stock for this house, or null.
+function clothMarket(state, house) {
+  return state.buildings.find((b) => coversHouse(state, house, b, 'clothing')) ?? null;
+}
+
+// Houses at a clothing level use up cloth from the market that covers them.
+function consumeCloth(state, hs) {
+  for (const h of hs) {
+    if (!HOUSE_LEVELS[h.level - 1].needs.includes('clothing') || !h.needsMet.clothing) continue;
+    const market = clothMarket(state, h);
+    if (market) takeStock(market, 'cloth', CLOTH_PER_HOUSE_PER_DAY);
+  }
+}
+
+// Each working building takes tools from the nearest storage for the coming day.
+function equipTools(state) {
+  for (const b of state.buildings) {
+    const cfg = BUILDINGS[b.type];
+    const works = b.built && cfg.job && !cfg.storage && (cfg.category === 'resource' || cfg.category === 'production');
+    b.tooled = false;
+    if (!works || b.workers.length < 1) continue;
+    const store = nearestStorage(state, b.x, b.z, (s) => (s.stock.tools ?? 0) >= TOOLS_PER_BUILDING_PER_DAY);
+    if (!store) continue;
+    takeStock(store, 'tools', TOOLS_PER_BUILDING_PER_DAY);
+    b.tooled = true;
+  }
 }
 
 function processHouse(state, house) {
-  evaluateHouse(state, house);
   const tax = HOUSE_LEVELS[house.level - 1].tax;
-  let income = house.residents.length * tax * house.happiness;
-  if (house.level < 4 && !house.upgrading && nextLevelMet(house)) startUpgrade(state, house);
+  const income = house.residents.length * tax * house.happiness;
+  if (house.autoUpgrade && upgradeStatus(state, house).canUpgrade) startUpgrade(state, house);
   updateUnhappiness(state, house);
   house.starvedToday = false;
-  house.breadToday = false;
-  income = Math.round(income * 10) / 10;
-  return income;
+  house.foodsToday = [];
+  return Math.round(income * 10) / 10;
+}
+
+function foodStock(state) {
+  const stock = totalStock(state);
+  return FOODS.reduce((sum, f) => sum + (stock[f] ?? 0), 0);
 }
 
 function averageHappiness(state, hs) {
@@ -161,8 +189,7 @@ function averageHappiness(state, hs) {
     sum += h.happiness * h.residents.length;
   }
   if (weight > 0) return sum / weight;
-  const stock = totalStock(state);
-  return stock.berries + stock.bread > 0 ? NO_HOUSE_HAPPINESS : 0;
+  return foodStock(state) > 0 ? NO_HOUSE_HAPPINESS : 0;
 }
 
 function edgeSpawn(state, rand) {
@@ -184,8 +211,7 @@ function immigrate(state, hs, rand) {
   const homeless = state.villagers.filter((v) => v.homeId == null).length;
   const avg = averageHappiness(state, hs);
   if (avg < IMMIGRATION_MIN_HAPPINESS || homeless > IMMIGRATION_MAX_HOMELESS) return;
-  const stock = totalStock(state);
-  if (stock.berries + stock.bread <= 0) {
+  if (foodStock(state) <= 0) {
     pushEvent(state, 'ไม่มีใครอยากย้ายเข้ามา เพราะหมู่บ้านไม่มีอาหาร');
     return;
   }
@@ -198,6 +224,12 @@ function immigrate(state, hs, rand) {
 }
 
 export function processMidnight(state, rand) {
+  const hs = houses(state);
+  for (const h of hs) evaluateHouse(state, h);
+  // own generator so sickness never disturbs the other random draws
+  processSickness(state, mulberry32(((state.seed * 2654435761) ^ Math.floor(state.time)) >>> 0));
+  consumeCloth(state, hs);
+  equipTools(state);
   let income = 0;
   for (const h of houses(state)) income += processHouse(state, h);
   state.gold = Math.round((state.gold + income) * 10) / 10;

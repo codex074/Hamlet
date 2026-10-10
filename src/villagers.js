@@ -1,31 +1,26 @@
 // Villager AI: plans a task queue when idle, then executes it step by step. Pure: no DOM, no globals.
 import {
-  WALK_SPEED, WATER_SPEED_MUL, WEAR_PER_STEP, HUNGER_PER_SEC, HUNGRY_AT, STARVING_AT,
-  CARRY_MAX, GATHER_RADIUS, FIELD_RADIUS, IDLE_WANDER_RADIUS, BUILDINGS, CATHEDRAL_STAGES, FOODS,
+  HUNGER_PER_SEC, HUNGRY_AT, STARVING_AT, CARRY_MAX, GATHER_RADIUS, FIELD_RADIUS, IDLE_WANDER_RADIUS,
+  BUILDINGS, CATHEDRAL_STAGES, FOODS, UPGRADE_BUILD_TIME,
 } from './config.js';
 import {
   distance, nearestStorage, nearestStorageWithAll, nearestFoodStorage, isStorage, addStock, takeStock,
 } from './economy.js';
-import { addWear, speedMultiplier } from './wear.js';
-import { isWater, fertilityAt } from './terrain.js';
+import { fertilityAt } from './terrain.js';
 import { clock } from './needs.js';
+import {
+  DONE, FAIL, WAIT_SECONDS, getBuilding, gotoPoint, gotoBuilding, firstEntry, planWait, countdown,
+  moveToward, workTime,
+} from './taskutil.js';
+import { JOB_PLANNERS, JOB_EXEC } from './jobs.js';
 
-const DONE = 'done';
-const FAIL = 'fail';
-const ARRIVE_DIST = 0.3;
-const DOOR_GAP = 0.8;
 const STAFF_GAP = 0.3;   // staff stand closer so arrival slack stays inside SERVICE_STAFFED_DIST
 const BUILD_CHUNK = 10;
-const UPGRADE_BUILD_TIME = 8;
 const SERVICE_SHIFT = 30;
-const WAIT_SECONDS = 3;
 
 // ---------- shared helpers (also used by sim.js / needs.js) ----------
 
-export function getBuilding(state, id) {
-  if (id == null) return null;
-  return state.buildings.find((b) => b.id === id) ?? null;
-}
+export { getBuilding };
 
 export function isSite(b) {
   return !b.built || b.upgrading === true;
@@ -44,47 +39,35 @@ export function buildTimeOf(b) {
 export function createVillager(state, x, z) {
   return {
     id: state.nextId++, x, z, homeId: null, jobId: null, hunger: 0,
-    carry: null, queue: [], res: {}, role: 'idle',
+    carry: null, queue: [], res: {}, role: 'idle', sick: false, sickDays: 0, healer: null,
   };
 }
 
-// Point on the building's rim, on the side facing (fromX, fromZ).
-function doorPoint(b, fromX, fromZ, gap = DOOR_GAP) {
-  const dx = fromX - b.x;
-  const dz = fromZ - b.z;
-  const d = Math.hypot(dx, dz);
-  const ux = d < 1e-6 ? 1 : dx / d;
-  const uz = d < 1e-6 ? 0 : dz / d;
-  const r = (BUILDINGS[b.type]?.radius ?? 0) + gap;
-  return { x: b.x + ux * r, z: b.z + uz * r };
-}
+const SHARED_PICKS = 6;   // shared (keepNode) gatherers choose among the nearest few nodes
 
-function gotoPoint(x, z) {
-  return { kind: 'goto', x, z };
-}
-
-function gotoBuilding(b, fromX, fromZ, gap = DOOR_GAP) {
-  const p = doorPoint(b, fromX, fromZ, gap);
-  return gotoPoint(p.x, p.z);
-}
-
-function firstEntry(obj) {
-  const [res, n] = Object.entries(obj)[0];
-  return { res, n };
-}
-
-function pickNode(state, kind, cx, cz) {
-  let best = null;
-  let bestD = Infinity;
+function pickNode(state, kind, cx, cz, shared = false, rand = null) {
+  const near = [];
   for (const n of state.nodes) {
-    if (n.kind !== kind || n.amount < 1 || n.reserved != null) continue;
+    if (n.kind !== kind || n.amount < 1 || (!shared && n.reserved != null)) continue;
     const d = distance(n.x, n.z, cx, cz);
-    if (d <= GATHER_RADIUS && d < bestD) {
-      best = n;
-      bestD = d;
-    }
+    if (d <= GATHER_RADIUS) near.push({ n, d });
   }
-  return best;
+  near.sort((a, b) => a.d - b.d);
+  if (near.length === 0) return null;
+  const pool = shared && rand ? Math.min(SHARED_PICKS, near.length) : 1;
+  return near[Math.floor(rand ? rand() * pool : 0) % pool].n;
+}
+
+// Removes a villager and everything that points at them.
+export function removeVillager(state, id) {
+  const i = state.villagers.findIndex((v) => v.id === id);
+  if (i < 0) return;
+  const [v] = state.villagers.splice(i, 1);
+  releaseReservations(state, v);
+  for (const b of state.buildings) {
+    b.workers = b.workers.filter((w) => w !== id);
+    if (b.residents) b.residents = b.residents.filter((r) => r !== id);
+  }
 }
 
 // ---------- reservations & failure ----------
@@ -98,6 +81,16 @@ export function releaseReservations(state, v) {
   if (r.siteId != null && r.siteRes) {
     const site = getBuilding(state, r.siteId);
     if (site) site.incoming[r.siteRes] = Math.max(0, (site.incoming[r.siteRes] ?? 0) - (r.siteN ?? 0));
+  }
+  if (r.animalId != null) {
+    const deer = (state.animals ?? []).find((a) => a.id === r.animalId);
+    if (deer && deer.reserved === v.id) deer.reserved = null;
+  }
+  if (r.patientId != null) {
+    const patient = state.villagers.find((p) => p.id === r.patientId);
+    if (patient && patient.healer === v.id) patient.healer = null;
+    const clinic = getBuilding(state, r.herbBId);
+    if (r.herbPaid && clinic?.stock) addStock(clinic, 'herbs', 1);   // treatment never happened: give the herb back
   }
   v.res = {};
 }
@@ -132,20 +125,26 @@ function planSleep(state, v) {
   return true;
 }
 
-function planWait(v, b) {
-  if (b) v.queue.push(gotoBuilding(b, v.x, v.z));
-  v.queue.push({ kind: 'wait', t: WAIT_SECONDS });
+// Sick villagers go home (or to the townhall) and lie down until healed.
+function planSick(state, v) {
+  const home = getBuilding(state, v.homeId) ?? state.buildings.find((b) => b.type === 'townhall');
+  if (home) v.queue.push(gotoBuilding(home, v.x, v.z));
+  v.queue.push({ kind: 'rest' });
+  v.role = 'idle';
+  return true;
 }
 
-function planGather(state, v, b, cfg) {
-  const node = pickNode(state, cfg.node, b.x, b.z);
+function planGather(state, v, b, cfg, rand) {
+  const node = pickNode(state, cfg.node, b.x, b.z, cfg.keepNode === true, rand);
   const store = node && nearestStorage(state, node.x, node.z);
   if (!node || !store) return planWait(v, null);
-  node.reserved = v.id;
-  v.res.nodeId = node.id;
+  if (!cfg.keepNode) {
+    node.reserved = v.id;
+    v.res.nodeId = node.id;
+  }
   v.queue.push(
     gotoPoint(node.x, node.z),
-    { kind: 'gather', nodeId: node.id, t: cfg.time, out: { ...cfg.output } },
+    { kind: 'gather', nodeId: node.id, t: workTime(b, cfg.time), out: { ...cfg.output }, keep: cfg.keepNode === true },
     gotoBuilding(store, node.x, node.z),
     { kind: 'put', bId: store.id },
   );
@@ -163,7 +162,7 @@ function planFarm(state, v, b, cfg, rand) {
   const wheat = Math.min(CARRY_MAX, Math.round(cfg.output.wheat * (0.5 + fertilityAt(state.terrain, px, pz))));
   v.queue.push(
     gotoPoint(px, pz),
-    { kind: 'produce', bId: b.id, t: cfg.time, out: { wheat } },
+    { kind: 'produce', bId: b.id, t: workTime(b, cfg.time), out: { wheat } },
     gotoBuilding(store, px, pz),
     { kind: 'put', bId: store.id },
   );
@@ -179,7 +178,7 @@ function planProcess(state, v, b, cfg) {
     gotoBuilding(src, v.x, v.z),
     { kind: 'take', bId: src.id, res: input.res, n: input.n },
     gotoBuilding(b, src.x, src.z),
-    { kind: 'produce', bId: b.id, t: cfg.time, in: { [input.res]: input.n }, out: { ...cfg.output } },
+    { kind: 'produce', bId: b.id, t: workTime(b, cfg.time), in: { [input.res]: input.n }, out: { ...cfg.output } },
     gotoBuilding(dst, b.x, b.z),
     { kind: 'put', bId: dst.id },
   );
@@ -193,10 +192,11 @@ function planJob(state, v, rand) {
     return false;
   }
   v.role = 'worker';
-  if (cfg.job === 'gather') planGather(state, v, b, cfg);
+  if (cfg.job === 'gather') planGather(state, v, b, cfg, rand);
   else if (cfg.job === 'farm') planFarm(state, v, b, cfg, rand);
   else if (cfg.job === 'process') planProcess(state, v, b, cfg);
   else if (cfg.job === 'service') v.queue.push(gotoBuilding(b, v.x, v.z, STAFF_GAP), { kind: 'staff', bId: b.id, t: SERVICE_SHIFT });
+  else if (JOB_PLANNERS[cfg.job]) JOB_PLANNERS[cfg.job](state, v, b, cfg, rand);
   else planWait(v, null);
   return true;
 }
@@ -250,6 +250,10 @@ export function planNext(state, v, rand) {
     return;
   }
   if (planEat(state, v)) return;
+  if (v.sick) {
+    planSick(state, v);
+    return;
+  }
   if (planSleep(state, v)) return;
   if (v.jobId != null && planJob(state, v, rand)) return;
   if (planHaul(state, v)) {
@@ -267,22 +271,7 @@ export function planNext(state, v, rand) {
 
 function execGoto(state, v, t, dt) {
   if (!Number.isFinite(t.x) || !Number.isFinite(t.z)) return FAIL;
-  const dx = t.x - v.x;
-  const dz = t.z - v.z;
-  const d = Math.hypot(dx, dz);
-  if (d <= ARRIVE_DIST) return DONE;
-  const water = isWater(state.terrain, v.x, v.z) ? WATER_SPEED_MUL : 1;
-  const speed = WALK_SPEED * speedMultiplier(state.wear, v.x, v.z) * water;
-  const move = Math.min(speed * dt, d);
-  v.x += (dx / d) * move;
-  v.z += (dz / d) * move;
-  addWear(state.wear, v.x, v.z, WEAR_PER_STEP * dt);
-  return d - move <= ARRIVE_DIST ? DONE : undefined;
-}
-
-function countdown(t, dt) {
-  t.t -= dt;
-  return t.t <= 0 ? DONE : undefined;
+  return moveToward(state, v, t.x, t.z, dt) ? DONE : undefined;
 }
 
 function execTake(state, v, t) {
@@ -329,10 +318,11 @@ function execGather(state, v, t, dt) {
   const node = state.nodes.find((n) => n.id === t.nodeId);
   if (!node || node.amount < 1) return FAIL;
   if (countdown(t, dt) !== DONE) return undefined;
+  v.carry = firstEntry(t.out);
+  if (t.keep) return DONE;   // shared node (herbs): nothing is used up
   node.amount -= 1;
   node.reserved = null;
   delete v.res.nodeId;
-  v.carry = firstEntry(t.out);
   if (node.amount <= 0 && node.kind !== 'berry') state.nodes.splice(state.nodes.indexOf(node), 1);
   return DONE;
 }
@@ -359,15 +349,23 @@ function execBuild(state, v, t, dt) {
   return timeUp || b.progress >= 1 ? DONE : undefined;
 }
 
+// First food the household has not had today (in FOODS order), else any food in stock.
+function pickFood(state, v, store) {
+  const home = getBuilding(state, v.homeId);
+  const eaten = home?.foodsToday ?? [];
+  const inStock = FOODS.filter((f) => (store.stock[f] ?? 0) >= 1);
+  return inStock.find((f) => !eaten.includes(f)) ?? inStock[0] ?? null;
+}
+
 function execEat(state, v, t) {
   const b = getBuilding(state, t.bId);
   if (!b || !isStorage(b)) return FAIL;
-  for (const food of FOODS) {
-    if ((b.stock[food] ?? 0) < 1) continue;
+  const food = pickFood(state, v, b);
+  if (food) {
     takeStock(b, food, 1);
     v.hunger = 0;
     const home = getBuilding(state, v.homeId);
-    if (food === 'bread' && home) home.breadToday = true;
+    if (home?.foodsToday && !home.foodsToday.includes(food)) home.foodsToday.push(food);
     return DONE;
   }
   return FAIL;
@@ -385,7 +383,15 @@ function execSleep(state, v) {
   return starving ? DONE : undefined;   // wake up to eat when hungry and food exists
 }
 
+// A sick villager lies down until healed; gets up to eat when hungry and food exists.
+function execRest(state, v) {
+  if (!v.sick) return DONE;
+  return v.hunger >= HUNGRY_AT && nearestFoodStorage(state, v.x, v.z) ? DONE : undefined;
+}
+
 const EXEC = {
+  ...JOB_EXEC,
+  rest: execRest,
   goto: execGoto,
   wait: (state, v, t, dt) => countdown(t, dt),
   take: execTake,

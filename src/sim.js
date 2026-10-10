@@ -1,7 +1,7 @@
 // World state, the fixed-step tick and player commands. Pure: no DOM, no globals.
 import {
   DAY_LENGTH, SPAWN, START, BUILDINGS, CATHEDRAL_STAGES, HOUSE_LEVELS, NODE_AMOUNT,
-  BERRY_REGROW_PER_SEC, REFUND_RATIO, ZONE_BRUSH, RESOURCES, BUILDER_RESERVE,
+  BERRY_REGROW_PER_SEC, REFUND_RATIO, ZONE_BRUSH, RESOURCES, BUILDER_RESERVE, DEER_RESPAWN_SEC,
 } from './config.js';
 import { mulberry32 } from './rng.js';
 import { generateTerrain, generateNodes } from './terrain.js';
@@ -13,9 +13,13 @@ import { canPlace as placementCanPlace, canPaintZone as placementCanPaintZone } 
 import { stepVillager, failVillager, createVillager, getBuilding, isSite } from './villagers.js';
 import {
   clock, serviceCovered, pushEvent, newBuilding, clearNodesUnder, processMidnight, assignHomes, planHouses,
+  evaluateHouse,
 } from './needs.js';
+import { pushFx } from './events.js';
+import { createDeer, stepAnimals } from './animals.js';
+import { upgradeStatus, requestUpgrade, setAutoUpgrade } from './upgrades.js';
 
-export { clock, serviceCovered };
+export { clock, serviceCovered, upgradeStatus, requestUpgrade, setAutoUpgrade };
 
 const MAX_STEP = 0.1;
 const INITIAL_SPREAD = 6;
@@ -26,9 +30,9 @@ const ZONE_KINDS = ['residential', 'field'];
 export function createWorld(seed) {
   const terrain = generateTerrain(seed);
   const state = {
-    version: 1, seed, tick: 0, time: (DAY_LENGTH * 6) / 24, lastDay: 1, gold: START.gold, nextId: 1,
+    version: 2, seed, tick: 0, time: (DAY_LENGTH * 6) / 24, lastDay: 1, gold: START.gold, nextId: 1,
     terrain, nodes: generateNodes(seed, terrain), buildings: [], zones: [], villagers: [],
-    wear: createWear(), events: [],
+    wear: createWear(), events: [], animals: [], fx: [], deerTimer: DEER_RESPAWN_SEC,
   };
   const hall = newBuilding(state, 'townhall', SPAWN.x, SPAWN.z, 0);
   hall.built = true;
@@ -41,6 +45,7 @@ export function createWorld(seed) {
     const ang = rand() * Math.PI * 2;
     state.villagers.push(createVillager(state, SPAWN.x + Math.cos(ang) * rad, SPAWN.z + Math.sin(ang) * rad));
   }
+  state.animals = createDeer(state);
   pushEvent(state, 'ยินดีต้อนรับสู่หมู่บ้านใหม่ของคุณ เริ่มสร้างโรงตัดไม้และโกดังได้เลย');
   return state;
 }
@@ -101,6 +106,7 @@ export function summary(state) {
     happiness: residents > 0 ? weighted / residents : 1,
     day: c.day, hour: c.hour, isNight: c.isNight,
     unemployed: state.villagers.filter((v) => v.jobId == null).length,
+    sick: state.villagers.filter((v) => v.sick).length,
   };
 }
 
@@ -220,6 +226,7 @@ function finishHouse(state, b) {
   }
   b.level += 1;
   b.upgrading = false;
+  pushFx(state, b.x, b.z, 'upgrade');
   b.progress = 0;
   b.needed = {};
   b.incoming = {};
@@ -245,7 +252,9 @@ function finishConstruction(state, b) {
   if (b.type === 'cathedral') return finishCathedral(state, b);
   b.built = true;
   b.progress = 1;
-  if (BUILDINGS[b.type].storage) b.stock = emptyStock();
+  const cfg = BUILDINGS[b.type];
+  if (cfg.storage) b.stock = emptyStock();
+  else if (cfg.supply) b.stock = { [cfg.supply]: 0 };
   pushEvent(state, `${BUILDINGS[b.type].name}สร้างเสร็จแล้ว`);
 }
 
@@ -279,7 +288,8 @@ function assignJobs(state) {
   for (let i = jobs.length - 1; i >= 0 && free.length < reserve; i--) {
     const b = jobs[i];
     while (b.workers.length > 0 && free.length < reserve) {
-      const v = state.villagers.find((w) => w.id === b.workers.pop());
+      const id = b.workers.pop();
+      const v = state.villagers.find((w) => w.id === id);
       if (v) { v.jobId = null; free.push(v); }
     }
   }
@@ -298,10 +308,12 @@ function stepWorld(state, dt) {
   const before = Math.floor(state.time);
   state.time += dt;
   for (const v of state.villagers) stepVillager(state, v, dt, rand);
+  stepAnimals(state, dt, rand);
   regrowBerries(state, dt);
   updateConstruction(state);
   if (Math.floor(state.time) !== before) {
     assignJobs(state);
+    for (const b of state.buildings) if (b.type === 'house' && b.built) evaluateHouse(state, b);
     assignHomes(state);
     planHouses(state, rand);
   }

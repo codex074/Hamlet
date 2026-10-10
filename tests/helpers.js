@@ -20,6 +20,7 @@ export function addBuilt(state, type, x, z) {
   b.progress = 1;
   b.needed = {};
   if (BUILDINGS[type].storage) b.stock = emptyStock();
+  else if (BUILDINGS[type].supply) b.stock = { [BUILDINGS[type].supply]: 0 };
   state.buildings.push(b);
   return b;
 }

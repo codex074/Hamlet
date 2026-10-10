@@ -15,7 +15,7 @@ import {
 
 test('createWorld basics', () => {
   const s = createWorld(1);
-  assert.equal(s.version, 1);
+  assert.equal(s.version, 2);
   const hall = townhall(s);
   assert.deepEqual([hall.x, hall.z, hall.built], [SPAWN.x, SPAWN.z, true]);
   assert.equal(s.villagers.length, START.villagers);
@@ -219,12 +219,13 @@ test('summary fields', () => {
   const s = world();
   const sum = summary(s);
   assert.deepEqual(Object.keys(sum).sort(),
-    ['day', 'gold', 'happiness', 'homeless', 'hour', 'housing', 'isNight', 'pop', 'stock', 'unemployed']);
+    ['day', 'gold', 'happiness', 'homeless', 'hour', 'housing', 'isNight', 'pop', 'sick', 'stock', 'unemployed']);
   assert.equal(sum.pop, 8);
   assert.equal(sum.homeless, 8);
   assert.equal(sum.housing, 0);
   assert.equal(sum.happiness, 1);
   assert.equal(sum.unemployed, 8);
+  assert.equal(sum.sick, 0);
   assert.equal(sum.day, 1);
   assert.equal(sum.hour, 6);
   assert.equal(sum.isNight, false);
@@ -309,4 +310,46 @@ test('INTEGRATION: three game days of a small village', () => {
   assert.equal(copy.villagers.length, s.villagers.length);
   assert.doesNotThrow(() => tick(copy, 10));
   assert.ok(Date.now() - t0 < 20000, `took ${Date.now() - t0} ms`);
+});
+
+test('INTEGRATION: ten game days with fishery, hunter, sheepfarm, herbalist, infirmary, weaver and market', () => {
+  const t0 = Date.now();
+  const s = createWorld(5);
+  for (let i = 0; i < 14; i++) addVillager(s, SPAWN.x + (i % 5), SPAWN.z + 3);   // pop 22 unlocks everything used
+  Object.assign(townhall(s).stock, { wood: 400, stone: 150, planks: 120, berries: 80, wool: 10, herbs: 6 });
+  const zspot = findZoneSpot(s, 'residential', 12, SPAWN.x + 22, SPAWN.z);
+  assert.ok(paintZone(s, 'residential', zspot.x, zspot.z, 12));
+  const placed = {};
+  const put = (type, tx, tz) => {
+    const spot = findPlaceSpot(s, type, tx, tz, 90);
+    assert.ok(spot, `spot for ${type}`);
+    placed[type] = placeBuilding(s, type, spot.x, spot.z, 0);
+    assert.ok(placed[type], `${type} placed`);
+  };
+  const tree = nearestNode(s, 'tree', SPAWN.x, SPAWN.z);
+  put('storehouse', SPAWN.x - 18, SPAWN.z);
+  put('woodcutter', tree.x, tree.z);
+  put('forager', SPAWN.x, SPAWN.z + 25);
+  put('chapel', SPAWN.x - 25, SPAWN.z + 15);
+  put('fishery', SPAWN.x, SPAWN.z - 35);
+  put('hunter', tree.x, tree.z);
+  put('herbalist', tree.x, tree.z);
+  put('sheepfarm', SPAWN.x + 30, SPAWN.z + 35);
+  put('infirmary', SPAWN.x - 20, SPAWN.z - 15);
+  put('weaver', SPAWN.x + 20, SPAWN.z - 20);
+  put('market', SPAWN.x + 5, SPAWN.z + 35);
+
+  const steps = Math.round((DAY_LENGTH * 10) / 0.1);
+  assert.doesNotThrow(() => { for (let i = 0; i < steps; i++) tick(s, 0.1); });
+  assert.equal(clock(s).day, 11);
+  for (const [type, id] of Object.entries(placed)) {
+    const b = s.buildings.find((x) => x.id === id);
+    assert.ok(b && b.built, `${type} built`);
+  }
+  assert.ok(s.villagers.length >= 8);
+  assert.ok(totalStock(s).fish + totalStock(s).meat + totalStock(s).herbs > 0, 'new professions produced something');
+  assert.ok(s.events.length <= 20 && s.fx.length <= 20);
+  const copy = deserialize(serialize(s));
+  assert.doesNotThrow(() => tick(copy, 10));
+  assert.ok(Date.now() - t0 < 30000, `took ${Date.now() - t0} ms`);
 });

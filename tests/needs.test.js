@@ -85,10 +85,10 @@ test('evaluateHouse computes needsMet and happiness fractions', () => {
   const h3 = addHouse(s, 90, 140, 2, 3);
   addStaffedService(s, 'chapel', 90, 150);
   evaluateHouse(s, h3);
-  assert.equal(h3.happiness, 0.5);      // food + religion of food/bread/religion/entertainment
-  h3.breadToday = true;
+  assert.equal(h3.happiness, 0.4);      // food + religion of food/variety2/religion/entertainment/health
+  h3.foodsToday = ['bread', 'fish'];
   evaluateHouse(s, h3);
-  assert.equal(h3.happiness, 0.75);
+  assert.equal(h3.happiness, 0.6);
 
   const h0 = addHouse(s, 40, 40, 0, 1);
   evaluateHouse(s, h0);
@@ -122,7 +122,7 @@ test('processMidnight starts an upgrade when all next-level needs are met', () =
   assert.equal(h.progress, 0);
   assert.ok(s.events.some((e) => e.text.includes('ไพร่')));
   assert.equal(h.starvedToday, false);
-  assert.equal(h.breadToday, false);
+  assert.deepEqual(h.foodsToday, []);
 });
 
 test('processMidnight: happy village attracts immigrants at the map edge', () => {

@@ -1,8 +1,11 @@
 // Save / load. Pure except for optional globalThis.localStorage access (always inside try/catch).
-import { GRID } from './config.js';
-import { generateTerrain } from './terrain.js';
+import { GRID, BUILDINGS, DEER_RESPAWN_SEC } from './config.js';
+import { generateTerrain, generateNodes } from './terrain.js';
+import { createDeer } from './animals.js';
+import { emptyNeeds } from './needs.js';
 
 const SAVE_KEY = 'hamlet-save-v1';
+const SAVE_VERSION = 2;
 const ARRAY_FIELDS = ['nodes', 'buildings', 'zones', 'villagers', 'events'];
 
 export function serialize(state) {
@@ -17,17 +20,52 @@ function parseSave(str) {
   } catch {
     throw new Error('ไฟล์บันทึกเสียหาย');
   }
-  const valid = data && typeof data === 'object' && data.version === 1
+  const fields = data?.version === 1 ? ARRAY_FIELDS : [...ARRAY_FIELDS, 'animals', 'fx'];
+  const valid = data && typeof data === 'object' && (data.version === 1 || data.version === SAVE_VERSION)
     && Number.isFinite(data.seed)
-    && ARRAY_FIELDS.every((k) => Array.isArray(data[k]))
+    && fields.every((k) => Array.isArray(data[k]))
     && Array.isArray(data.wear) && data.wear.length === GRID * GRID;
   if (!valid) throw new Error('ไฟล์บันทึกไม่ถูกต้อง');
   return data;
 }
 
+// v1 -> v2: deer, fx, sickness fields, house upgrade/food fields, supply stocks and ore veins.
+function migrateV1(state) {
+  state.version = SAVE_VERSION;
+  state.fx = [];
+  state.deerTimer = DEER_RESPAWN_SEC;
+  for (const b of state.buildings) {
+    const cfg = BUILDINGS[b.type];
+    if (b.type === 'house') {
+      b.autoUpgrade = true;
+      b.foodsToday = [];
+      delete b.breadToday;
+      b.needsMet = emptyNeeds();
+    } else {
+      b.tooled = false;
+      if (cfg.job === 'ranch') b.cycle = 0;
+    }
+    if (b.built && cfg.supply && !b.stock) b.stock = { [cfg.supply]: 0 };
+  }
+  for (const v of state.villagers) Object.assign(v, { sick: false, sickDays: 0, healer: null });
+  state.animals = createDeer(state);
+  addOreNodes(state);
+}
+
+// Appends the seed's ore veins (v1 worlds had none), skipping spots under existing buildings.
+function addOreNodes(state) {
+  let id = state.nodes.reduce((m, n) => Math.max(m, n.id), 0);
+  const free = (n) => !state.buildings.some((b) => Math.hypot(b.x - n.x, b.z - n.z) < BUILDINGS[b.type].radius + 1);
+  for (const n of generateNodes(state.seed, state.terrain)) {
+    if (n.kind === 'ore' && free(n)) state.nodes.push({ ...n, id: ++id });
+  }
+}
+
 export function deserialize(str) {
   const data = parseSave(str);
-  return { ...data, terrain: generateTerrain(data.seed), wear: Float32Array.from(data.wear) };
+  const state = { ...data, terrain: generateTerrain(data.seed), wear: Float32Array.from(data.wear) };
+  if (data.version === 1) migrateV1(state);
+  return state;
 }
 
 function storage() {

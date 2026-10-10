@@ -1,5 +1,5 @@
 // Player tools: build (ghost), zone brush, demolish, and building selection.
-import { BUILDINGS, ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS } from '../config.js';
+import { BUILDINGS, ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS, FISH_RADIUS, HUNT_RADIUS } from '../config.js';
 import { makeBuildingModel } from '../render/models.js';
 
 const ROT_STEP = Math.PI / 12; // 15 degrees
@@ -146,9 +146,11 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
   function buildRingRadius(type) {
     const d = BUILDINGS[type];
     if (!d) return 0;
-    if (d.job === 'service') return d.serviceRadius || 0;
+    if (d.serviceRadius) return d.serviceRadius;   // service, doctor, market
     if (d.job === 'gather') return GATHER_RADIUS;
     if (d.job === 'farm') return FIELD_RADIUS;
+    if (d.job === 'fish') return FISH_RADIUS;
+    if (d.job === 'hunt') return HUNT_RADIUS;
     return 0;
   }
 

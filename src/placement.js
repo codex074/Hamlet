@@ -1,5 +1,7 @@
 // Free (grid-less) placement checks for circular footprints and zones. Pure: no DOM, no globals.
-import { WORLD_SIZE, EDGE_MARGIN, MAX_SLOPE, BUILDINGS, HOUSE_SITE_TRIES } from './config.js';
+import {
+  WORLD_SIZE, EDGE_MARGIN, MAX_SLOPE, BUILDINGS, HOUSE_SITE_TRIES, NEAR_WATER_DIST, CELL,
+} from './config.js';
 import { heightAt, isWater } from './terrain.js';
 
 const DEFAULT_GEO = { heightAt, isWater };
@@ -50,8 +52,24 @@ export function footprintOK(state, x, z, r, opts = {}, geo = DEFAULT_GEO) {
   return { ok: true };
 }
 
+// True if any water lies within `reach` metres of (x, z).
+function waterWithin(state, x, z, reach, geo) {
+  for (let dz = -reach; dz <= reach; dz += CELL) {
+    for (let dx = -reach; dx <= reach; dx += CELL) {
+      if (Math.hypot(dx, dz) <= reach && geo.isWater(state.terrain, x + dx, z + dz)) return true;
+    }
+  }
+  return false;
+}
+
 export function canPlace(state, type, x, z, rot, geo = DEFAULT_GEO) {
-  return footprintOK(state, x, z, BUILDINGS[type].radius, {}, geo);
+  const cfg = BUILDINGS[type];
+  const fp = footprintOK(state, x, z, cfg.radius, {}, geo);
+  if (!fp.ok) return fp;
+  if (cfg.nearWater && !waterWithin(state, x, z, cfg.radius + NEAR_WATER_DIST, geo)) {
+    return { ok: false, reason: 'ต้องวางติดแหล่งน้ำ' };
+  }
+  return fp;
 }
 
 export function canPaintZone(state, kind, x, z, r, geo = DEFAULT_GEO) {

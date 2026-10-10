@@ -24,7 +24,7 @@ test('hungry villager walks to storage and eats', () => {
   assert.equal(s.buildings[0].stock.berries, before - 1);
 });
 
-test('villager prefers bread over berries and marks bread eaten at home', () => {
+test('villager prefers bread over berries and records it in the home foodsToday', () => {
   const s = world();
   const hall = townhall(s);
   hall.stock.bread = 2;
@@ -34,7 +34,7 @@ test('villager prefers bread over berries and marks bread eaten at home', () => 
   v.hunger = 0.8;
   runSteps(s, v, 10);
   assert.equal(hall.stock.bread, 1);
-  assert.equal(home.breadToday, true);
+  assert.deepEqual(home.foodsToday, ['bread']);
 });
 
 test('hungry villager with no food in stock does not try to eat', () => {

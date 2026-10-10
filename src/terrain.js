@@ -1,7 +1,7 @@
 // Terrain generation: heightmap, river, fertility and resource nodes. Pure: no DOM, no globals.
 import {
   WORLD_SIZE, GRID, CELL, MAX_HEIGHT, RIVER_WIDTH,
-  SPAWN, SPAWN_CLEAR_RADIUS, NODE_COUNTS, NODE_AMOUNT,
+  SPAWN, SPAWN_CLEAR_RADIUS, NODE_COUNTS, NODE_AMOUNT, ORE_MIN_HEIGHT,
 } from './config.js';
 import { mulberry32, makeNoise2D, fbm } from './rng.js';
 
@@ -12,6 +12,8 @@ const RIVER_BED = -0.6;
 const RIVER_SLOPE = 12;  // width of the sloping bank beyond the water's edge
 const FOREST_TREE = 0.55;
 const FOREST_BERRY_MIN = 0.42;
+const ORE_GAP = 6;
+const ORE_RELAX_SHARE = 0.15;   // fallback: ore on the highest 15% of land
 
 function smoothstep(t) {
   const c = Math.min(1, Math.max(0, t));
@@ -154,13 +156,14 @@ export function generateNodes(seed, terrain) {
   const lo = 4;
   const hi = WORLD_SIZE - 4;
 
-  // spec: { kind, count, attempts, minGap, clearRadius, forestOk(f) }
+  // spec: { kind, count, attempts, minGap, clearRadius, forestOk(f), spotOk?(x, z) }; returns number placed
   function place(spec) {
     let placed = 0;
     for (let a = 0; a < spec.attempts && placed < spec.count; a++) {
       const x = lo + rand() * (hi - lo);
       const z = lo + rand() * (hi - lo);
       if (!spec.forestOk(forestAt(x, z))) continue;
+      if (spec.spotOk && !spec.spotOk(x, z)) continue;
       if (isWater(terrain, x, z)) continue;
       if (Math.hypot(x - SPAWN.x, z - SPAWN.z) <= spec.clearRadius) continue;
       if (hash.near(x, z, spec.minGap)) continue;
@@ -169,6 +172,7 @@ export function generateNodes(seed, terrain) {
       hash.add(node);
       placed++;
     }
+    return placed;
   }
 
   place({ kind: 'tree', count: NODE_COUNTS.tree, attempts: 40000, minGap: 1.6,
@@ -177,5 +181,31 @@ export function generateNodes(seed, terrain) {
     clearRadius: SPAWN_CLEAR_RADIUS, forestOk: (f) => f < FOREST_TREE });
   place({ kind: 'berry', count: NODE_COUNTS.berry, attempts: 20000, minGap: 2,
     clearRadius: SPAWN_CLEAR_RADIUS - 8, forestOk: (f) => f >= FOREST_BERRY_MIN && f <= FOREST_TREE });
+  placeOre(place, terrain);
   return nodes;
+}
+
+// Height reached by the top `share` of land vertices.
+function landHeightQuantile(terrain, share) {
+  const hs = [];
+  for (let iz = 0; iz < VERTS; iz++) {
+    for (let ix = 0; ix < VERTS; ix++) {
+      if (!isWater(terrain, ix * CELL, iz * CELL)) hs.push(terrain.heights[iz * VERTS + ix]);
+    }
+  }
+  hs.sort((a, b) => a - b);
+  return hs[Math.min(hs.length - 1, Math.floor(hs.length * (1 - share)))];
+}
+
+// Ore veins on high ground; if there is too little, relax to the highest part of the land.
+function placeOre(place, terrain) {
+  const spec = (minH, count) => ({
+    kind: 'ore', count, attempts: 20000, minGap: ORE_GAP, clearRadius: SPAWN_CLEAR_RADIUS,
+    forestOk: () => true, spotOk: (x, z) => heightAt(terrain, x, z) >= minH,
+  });
+  const high = ORE_MIN_HEIGHT * MAX_HEIGHT;
+  const got = place(spec(high, NODE_COUNTS.ore));
+  if (got >= NODE_COUNTS.ore) return;
+  const relaxed = Math.min(high, landHeightQuantile(terrain, ORE_RELAX_SHARE));
+  place(spec(relaxed, NODE_COUNTS.ore - got));
 }

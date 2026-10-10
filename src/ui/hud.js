@@ -2,15 +2,20 @@
 // DOM only; all game data comes in through update(summary, state) / showInfo(building, state).
 import {
   BUILDINGS, RESOURCES, RESOURCE_INFO, HOUSE_LEVELS, NEED_INFO, CATHEDRAL_STAGES,
-  ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS,
+  ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS, FISH_RADIUS, HUNT_RADIUS, FOODS, SUPPLY_MAX, TOOL_SPEED_BONUS,
+  SICK_LEAVE_DAYS,
 } from '../config.js';
-import { clock, isUnlocked } from '../sim.js';
+import * as sim from '../sim.js';
+
+const { clock, isUnlocked } = sim;
 
 const UPDATE_INTERVAL_MS = 250;
 
 const BUILDING_ICON = {
   storehouse: '📦', woodcutter: '🪓', forager: '🧺', quarry: '⛏️', sawmill: '🪚',
   farmhouse: '🌾', mill: '🌬️', bakery: '🥖', chapel: '⛪', tavern: '🍺', cathedral: '🏰',
+  fishery: '🎣', hunter: '🏹', herbalist: '🌿', sheepfarm: '🐑', ironmine: '⚒️',
+  weaver: '🧵', blacksmith: '🛠️', infirmary: '🏥', market: '🏪',
 };
 
 const BUILDING_DESC = {
@@ -24,11 +29,27 @@ const BUILDING_DESC = {
   bakery: 'อบแป้งเป็นขนมปัง อาหารที่ชนชั้นสูงขึ้นต้องการ',
   chapel: 'ให้บริการด้านศาสนาแก่บ้านที่อยู่ในรัศมี ต้องมีคนประจำ',
   tavern: 'ให้ความบันเทิงแก่บ้านที่อยู่ในรัศมี ต้องมีคนประจำ',
+  fishery: 'ชาวประมงตกปลาจากชายน้ำ ต้องวางติดแหล่งน้ำ (แม่น้ำ) แล้วส่งปลาเข้าโกดัง เป็นอาหารเพิ่มความหลากหลาย',
+  hunter: `นักล่าออกล่ากวางป่าในรัศมี ${HUNT_RADIUS} ม. แล้วส่งเนื้อเข้าโกดัง กวางมีจำนวนจำกัดแต่เกิดใหม่เรื่อยๆ`,
+  herbalist: `เก็บสมุนไพรตามต้นไม้ในรัศมี ${GATHER_RADIUS} ม. โดยไม่ทำให้ต้นไม้หมด สมุนไพรใช้รักษาคนป่วยที่สถานพยาบาล`,
+  sheepfarm: 'คอกแกะ เลี้ยงแกะสลับให้เนื้อและขนแกะ ขนแกะส่งต่อให้ช่างทอผ้า',
+  ironmine: 'ขุดแร่เหล็กจากเส้นแร่บนที่สูง ส่งต่อให้โรงตีเหล็กทำเครื่องมือ',
+  weaver: 'ทอขนแกะเป็นผ้า ผ้าไปเติมที่ตลาดเพื่อให้บ้านระดับสูงมีเสื้อผ้า',
+  blacksmith: 'ตีแร่เหล็กเป็นเครื่องมือ อาคารผลิตที่มีเครื่องมือจะทำงานเร็วขึ้น และใช้อัปเกรดบ้านระดับสูงสุด',
+  infirmary: 'หมอรักษาคนป่วยในรัศมี ต้องมีสมุนไพรในคลังของสถานพยาบาล และให้บริการด้านสุขภาพแก่บ้านรอบๆ',
+  market: 'พ่อค้าขายผ้าให้บ้านในรัศมี ต้องมีผ้าในคลังของตลาด บ้านระดับ 4 ขึ้นไปต้องการเสื้อผ้า',
   cathedral: 'สิ่งก่อสร้างยิ่งใหญ่ สร้างทีละ 4 ขั้น ต้องใช้ทองด้วย สร้างได้เพียงหลังเดียว',
 };
 
-const NODE_NAME = { tree: 'ต้นไม้', rock: 'ก้อนหิน', berry: 'พุ่มเบอร์รี่' };
-const SERVICE_NAME = { religion: 'ศาสนา', entertainment: 'ความบันเทิง' };
+const NODE_NAME = { tree: 'ต้นไม้', rock: 'ก้อนหิน', berry: 'พุ่มเบอร์รี่', ore: 'เส้นแร่' };
+const SERVICE_NAME = { religion: 'ศาสนา', entertainment: 'ความบันเทิง', health: 'สุขภาพ', clothing: 'เสื้อผ้า' };
+
+// Top-bar resource groups (every RESOURCES entry appears in exactly one popover).
+const RES_GROUPS = [
+  { id: 'mat', label: 'วัสดุ', items: ['wood', 'planks', 'stone', 'ore', 'tools'], head: ['wood', 'planks', 'stone'] },
+  { id: 'food', label: 'อาหาร', items: ['berries', 'bread', 'fish', 'meat', 'wheat', 'flour'], headTotal: FOODS },
+  { id: 'goods', label: 'สินค้า', items: ['wool', 'cloth', 'herbs'], head: ['cloth', 'herbs'] },
+];
 
 const ZONE_ITEMS = [
   { zone: 'residential', icon: '🏘️', name: 'โซนที่อยู่อาศัย',
@@ -79,10 +100,16 @@ function jobLine(type) {
   if (d.storage) return 'เก็บทรัพยากร · ไม่ต้องใช้คนงาน';
   const parts = [];
   if (d.workers) parts.push(`คนงาน ${d.workers}`);
-  if (d.job === 'gather') parts.push(`${NODE_NAME[d.node] || d.node} → ${resNames(d.output)}`);
+  if (d.job === 'gather') parts.push(`${NODE_NAME[d.node] || d.node}${d.keepNode ? ' (ไม่ทำให้หมด)' : ''} → ${resNames(d.output)}`);
   else if (d.job === 'farm') parts.push(`ไร่นา → ${resNames(d.output)}`);
   else if (d.job === 'process') parts.push(`${resNames(d.input)} → ${resNames(d.output)}`);
   else if (d.job === 'service') parts.push(`บริการ${SERVICE_NAME[d.service] || ''} รัศมี ${d.serviceRadius} ม.`);
+  else if (d.job === 'fish') parts.push(`ตกปลา (ติดน้ำ, รัศมี ${FISH_RADIUS} ม.) → ${resNames(d.output)}`);
+  else if (d.job === 'hunt') parts.push(`ล่ากวาง (รัศมี ${HUNT_RADIUS} ม.) → ${resNames(d.output)}`);
+  else if (d.job === 'ranch') parts.push(`เลี้ยงแกะ → ${(d.outputs || []).map(resNames).join(' / ')}`);
+  else if (d.job === 'doctor' || d.job === 'market') {
+    parts.push(`บริการ${SERVICE_NAME[d.service] || ''} รัศมี ${d.serviceRadius} ม. · ใช้${info(d.supply).name}`);
+  }
   return parts.join(' · ');
 }
 
@@ -131,11 +158,62 @@ export function createHUD(root, handlers = {}) {
     nums[key] = { chip: c, ic, num };
     return nums[key];
   }
-  for (const res of RESOURCES) addChip(res, info(res).icon, info(res).name);
+  // 14 resources: three compact groups with a popover listing every item
+  const heads = {};   // groupId -> { total?: node, items: {res: node} }
+  const groupChips = [];
+  for (const g of RES_GROUPS) {
+    const chip = el('div', 'chip grp');
+    chip.appendChild(el('span', 'gl', g.label));
+    const hd = el('span', 'hd');
+    const rec = { items: {}, total: null, g };
+    if (g.headTotal) {
+      const h = el('span', 'h');
+      h.append(el('span', 'ic', '🍽️'), rec.total = el('span', 'num', '0'));
+      h.title = `อาหารพร้อมกิน: ${g.headTotal.map((r) => info(r).name).join(' + ')}`;
+      hd.appendChild(h);
+    } else {
+      for (const r of g.head) {
+        const h = el('span', 'h');
+        h.title = info(r).name;
+        h.append(el('span', 'ic', info(r).icon), rec.items[r] = el('span', 'num', '0'));
+        hd.appendChild(h);
+      }
+    }
+    chip.appendChild(hd);
+    chip.appendChild(el('span', 'caret', '▾'));
+    const pop = el('div', 'gpop');
+    pop.appendChild(el('div', 'gpt', g.label));
+    const grid = el('div', 'gpg');
+    for (const r of g.items) {
+      const row = el('div', 'gpi');
+      const n = el('span', 'num', '0');
+      row.append(el('span', 'ic', info(r).icon), el('span', 'nm', info(r).name), n);
+      grid.appendChild(row);
+      nums[r] = { num: n };
+    }
+    pop.appendChild(grid);
+    chip.appendChild(pop);
+    chip.addEventListener('click', (e) => {
+      if (pop.contains(e.target)) return;
+      const open = !chip.classList.contains('open');
+      for (const c of groupChips) c.classList.remove('open');
+      chip.classList.toggle('open', open);
+    });
+    chip.addEventListener('mouseleave', () => chip.classList.remove('open'));
+    topbar.appendChild(chip);
+    groupChips.push(chip);
+    heads[g.id] = rec;
+  }
+  document.addEventListener('click', (e) => {
+    if (!topbar.contains(e.target)) for (const c of groupChips) c.classList.remove('open');
+  });
   addChip('gold', info('gold').icon, info('gold').name, 'gold');
   const popChip = addChip('pop', '👥', 'ประชากร');
   const popSub = el('span', 'sub', '');
   popChip.chip.appendChild(popSub);
+  const sickEl = el('span', 'sick', '');
+  sickEl.hidden = true;
+  popChip.chip.appendChild(sickEl);
   addChip('happy', '😊', 'ความสุขเฉลี่ย');
   addChip('clock', '☀️', 'เวลา', 'clock');
 
@@ -298,12 +376,25 @@ export function createHUD(root, handlers = {}) {
     b.type = 'button';
     b.addEventListener('click', () => { menuEl.hidden = true; fn(); });
     menuEl.appendChild(b);
+    return b;
+  }
+  function allAutoOn() {
+    const houses = ((lastState && lastState.buildings) || []).filter((b) => b.type === 'house');
+    return houses.length === 0 || houses.every((h) => h.autoUpgrade !== false);
+  }
+  function refreshMenu() {
+    autoBtn.textContent = `⬆️ อัปเกรดอัตโนมัติทุกหลัง: ${allAutoOn() ? 'เปิด' : 'ปิด'}`;
   }
   addMenuItem('📖 วิธีเล่น', () => call('showHelp'));
+  const autoBtn = addMenuItem('', () => {
+    const on = !allAutoOn();
+    call('setAutoUpgrade', null, on);
+    toast(`อัปเกรดอัตโนมัติทุกหลัง: ${on ? 'เปิด' : 'ปิด'}`);
+  });
   addMenuItem('💾 บันทึกเกม', () => { call('saveGame'); toast('บันทึกเกมแล้ว'); });
   addMenuItem('🆕 เกมใหม่', () => confirmDialog('เริ่มเกมใหม่?', 'หมู่บ้านปัจจุบันจะถูกลบและไม่สามารถกู้คืนได้', 'เกมใหม่', () => call('newGame')));
 
-  menuBtn.addEventListener('click', (e) => { e.stopPropagation(); menuEl.hidden = !menuEl.hidden; });
+  menuBtn.addEventListener('click', (e) => { e.stopPropagation(); refreshMenu(); menuEl.hidden = !menuEl.hidden; });
   document.addEventListener('click', (e) => {
     if (!menuEl.hidden && !menuEl.contains(e.target) && e.target !== menuBtn) menuEl.hidden = true;
   });
@@ -385,6 +476,7 @@ export function createHUD(root, handlers = {}) {
       infoWkEl = wk;
     }
     infoBodyEl = el('div', 'info-body');
+    infoBodyEl.addEventListener('click', onInfoClick);
     infoEl.appendChild(infoBodyEl);
     infoBodyHtml = '';
     infoEl.hidden = false;
@@ -441,28 +533,70 @@ export function createHUD(root, handlers = {}) {
     return h + '</ul>';
   }
 
-  function houseHtml(b) {
-    const lvl = HOUSE_LEVELS[Math.max(0, Math.min(HOUSE_LEVELS.length - 1, (b.level || 1) - 1))];
+  const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+  function levelOf(n) {
+    return HOUSE_LEVELS[Math.max(0, Math.min(HOUSE_LEVELS.length - 1, (n || 1) - 1))];
+  }
+
+  function safeUpgradeStatus(state, b) {
+    try {
+      return typeof sim.upgradeStatus === 'function' ? sim.upgradeStatus(state, b) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function costChips(cost, missing) {
+    return Object.entries(cost || {})
+      .filter(([, n]) => n > 0)
+      .map(([r, n]) => {
+        const short = (missing && missing[r] > 0);
+        return `<span class="rc${short ? ' short' : ''}">${info(r).icon} ${info(r).name} ×${n}${short ? ` (ขาด ${Math.ceil(missing[r])})` : ''}</span>`;
+      }).join('');
+  }
+
+  function houseHtml(b, state) {
+    const lvl = levelOf(b.level);
     const res = (b.residents || []).length;
+    const hp = b.happiness != null ? b.happiness : 1;
+    const villagers = (state && state.villagers) || [];
+    const sickHere = villagers.filter((v) => v.sick && v.homeId === b.id).length;
     let h = `<div class="stat ok">ระดับ ${lvl.level}: ${lvl.name}</div>`;
     h += `<div>👥 ผู้อยู่อาศัย ${res}/${lvl.capacity}</div>`;
-    h += `<div>${happyFace(b.happiness != null ? b.happiness : 1)} ความสุข ${Math.round((b.happiness != null ? b.happiness : 1) * 100)}%</div>`;
-    h += '<div class="sub">ความต้องการ</div><ul>';
+    h += `<div>${happyFace(hp)} ความสุข ${Math.round(hp * 100)}%</div>`;
+    if (sickHere > 0) h += `<div class="warn">🤒 ป่วย ${sickHere} คน</div>`;
+    h += '<div class="sub">ความต้องการตอนนี้</div><ul>';
     for (const n of lvl.needs) {
       const ok = b.needsMet && b.needsMet[n];
       h += `<li>${ok ? '✅' : '❌'} ${NEED_INFO[n] || n}</li>`;
     }
     h += '</ul>';
-    const next = HOUSE_LEVELS[lvl.level];
-    if (next) {
-      const extra = next.needs.filter((n) => !lvl.needs.includes(n)).map((n) => NEED_INFO[n]).join(', ');
-      h += `<div class="sub">ระดับถัดไป: ${next.name}`;
-      if (extra) h += ` · ต้องการเพิ่ม ${extra}`;
-      h += '</div>';
-      if (next.upgradeCost) h += `<div class="rcs">${resChips(next.upgradeCost)}</div>`;
-    } else {
+    const foods = (b.foodsToday || []).map((f) => info(f).icon).join(' ');
+    h += `<div class="sub">อาหารที่กินวันนี้</div><div>${foods || '<span class="dim">ยังไม่มี</span>'}</div>`;
+
+    if (b.upgrading) return h;   // progress bar is rendered by siteHtml
+    const st = safeUpgradeStatus(state, b);
+    const next = st ? (st.nextLevel == null ? null
+      : typeof st.nextLevel === 'object' ? st.nextLevel : levelOf(st.nextLevel)) : HOUSE_LEVELS[lvl.level] || null;
+    if (!next) {
       h += '<div class="sub ok">ระดับสูงสุดแล้ว</div>';
+      return h;
     }
+    h += `<div class="upg"><div class="uph">อัปเกรดเป็น ${esc(next.name)}</div>`;
+    const needs = st && Array.isArray(st.needs)
+      ? st.needs
+      : next.needs.map((k) => ({ key: k, name: NEED_INFO[k] || k, met: !!(b.needsMet && b.needsMet[k]) }));
+    h += '<ul>' + needs.map((n) => `<li>${n.met ? '✅' : '❌'} ${esc(n.name || NEED_INFO[n.key] || n.key)}</li>`).join('') + '</ul>';
+    const cost = (st && st.cost) || next.upgradeCost;
+    if (cost) h += `<div class="sub">วัสดุที่ใช้</div><div class="rcs">${costChips(cost, st && st.missing)}</div>`;
+    const can = !!(st && st.canUpgrade);
+    const why = can ? 'เริ่มอัปเกรดบ้านหลังนี้ทันที' : ((st && st.reason) || 'ยังอัปเกรดไม่ได้');
+    h += `<div class="upgrow" title="${esc(why)}"><button type="button" class="btn primary ubtn" data-act="upgrade" ${can ? '' : 'disabled'}>⬆️ อัปเกรด</button></div>`;
+    if (!can) h += `<div class="warn small">${esc(why)}</div>`;
+    h += '</div>';
+    const auto = b.autoUpgrade !== false;
+    h += `<div class="autorow"><span>อัปเกรดอัตโนมัติ</span><button type="button" class="tgl${auto ? ' on' : ''}" data-act="auto" title="อัปเกรดเองทุกเที่ยงคืนเมื่อพร้อม">${auto ? 'เปิด' : 'ปิด'}</button></div>`;
     return h;
   }
 
@@ -471,6 +605,25 @@ export function createHUD(root, handlers = {}) {
     let h = '<div class="sub">ของในคลัง</div>';
     if (!entries.length) return h + '<div class="dim">ว่างเปล่า</div>';
     h += '<div class="rcs">' + entries.map((r) => `<span class="rc">${info(r).icon} ${info(r).name} ${Math.floor(b.stock[r])}</span>`).join('') + '</div>';
+    return h;
+  }
+
+  function supplyHtml(b, def, state) {
+    const sup = def.supply;
+    const have = Math.floor((b.stock && b.stock[sup]) || 0);
+    let h = `<div class="sub">คลังสำหรับให้บริการ</div><div class="stat ${have > 0 ? 'ok' : 'warn'}">${info(sup).icon} ${info(sup).name} ${have}/${SUPPLY_MAX}</div>`;
+    const covered = ((state && state.buildings) || []).filter((o) => o.type === 'house' && o.built
+      && Math.hypot(o.x - b.x, o.z - b.z) <= def.serviceRadius).length;
+    h += `<div class="dim">ครอบคลุมบ้าน ${covered} หลังในรัศมี ${def.serviceRadius} ม.</div>`;
+    if (def.job === 'doctor') {
+      h += have > 0
+        ? '<div class="dim">หมอรักษาคนป่วยในรัศมีด้วยสมุนไพรจากคลังนี้</div>'
+        : '<div class="warn small">ไม่มีสมุนไพร — บริการสุขภาพหยุดจนกว่าจะมีสมุนไพรส่งมา</div>';
+    } else {
+      h += have > 0
+        ? '<div class="dim">พ่อค้านำผ้ามาเติม บ้านระดับ 4+ ใช้ผ้าตอนเที่ยงคืน</div>'
+        : '<div class="warn small">ไม่มีผ้า — บ้านในรัศมีจะไม่ได้รับเสื้อผ้า</div>';
+    }
     return h;
   }
 
@@ -485,14 +638,33 @@ export function createHUD(root, handlers = {}) {
     }
     if (isSite(b)) {
       h += siteHtml(b, state);
-      if (b.type === 'house' && b.upgrading) h += houseHtml(b);
+      if (b.type === 'house' && b.upgrading) h += houseHtml(b, state);
       return h;
     }
-    if (b.type === 'house') return houseHtml(b);
+    if (b.type === 'house') return houseHtml(b, state);
     const working = !(def.workers > 0 && (b.workers || []).length === 0);
     h += working ? '<div class="stat ok">ทำงานปกติ</div>' : '<div class="stat warn">ยังไม่มีคนงาน</div>';
-    if (def.storage || b.stock) h += stockHtml(b);
+    if (b.tooled) h += `<div class="ok small">🔧 มีเครื่องมือ (+${Math.round(TOOL_SPEED_BONUS * 100)}%)</div>`;
+    const sickWorkers = ((state && state.villagers) || []).filter((v) => v.sick && v.jobId === b.id).length;
+    if (sickWorkers > 0) h += `<div class="warn small">🤒 คนงานป่วย ${sickWorkers} คน (ออกจากงานชั่วคราว)</div>`;
+    if (def.supply) h += supplyHtml(b, def, state);
+    else if (def.storage || b.stock) h += stockHtml(b);
     return h;
+  }
+
+  function onInfoClick(e) {
+    const btn = e.target.closest && e.target.closest('[data-act]');
+    if (!btn || btn.disabled) return;
+    const b = findBuilding(lastState, infoId);
+    if (!b) return;
+    if (btn.dataset.act === 'upgrade') {
+      const r = call('requestUpgrade', b.id);
+      if (r && r.ok) toast(`เริ่มอัปเกรดบ้านเป็น${(() => { const st = safeUpgradeStatus(lastState, b); const n = st && st.nextLevel; return n && typeof n === 'object' ? n.name : levelOf((b.level || 1) + 1).name; })()}`);
+      else toast((r && r.reason) || 'อัปเกรดไม่ได้');
+    } else if (btn.dataset.act === 'auto') {
+      call('setAutoUpgrade', b.id, b.autoUpgrade === false);
+    }
+    renderInfo(lastState);
   }
 
   function renderInfo(state) {
@@ -560,10 +732,22 @@ export function createHUD(root, handlers = {}) {
     lastUpdate = now;
 
     const stock = summary.stock || {};
-    for (const res of RESOURCES) setText(nums[res].num, String(Math.floor(stock[res] || 0)));
+    for (const res of RESOURCES) if (nums[res]) setText(nums[res].num, String(Math.floor(stock[res] || 0)));
+    for (const g of RES_GROUPS) {
+      const rec = heads[g.id];
+      for (const [r, node] of Object.entries(rec.items)) setText(node, String(Math.floor(stock[r] || 0)));
+      if (rec.total) {
+        const tot = g.headTotal.reduce((acc, r) => acc + Math.floor(stock[r] || 0), 0);
+        setText(rec.total, String(tot));
+        rec.total.parentNode.classList.toggle('low', tot < (summary.pop || 0));
+      }
+    }
     setText(nums.gold.num, String(Math.floor(summary.gold || 0)));
     setText(nums.pop.num, String(summary.pop || 0));
     setText(popSub, ` (ไร้บ้าน ${summary.homeless || 0})`);
+    const sick = summary.sick != null ? summary.sick : ((state && state.villagers) || []).filter((v) => v.sick).length;
+    sickEl.hidden = !(sick > 0);
+    setText(sickEl, sick > 0 ? ` 🤒 ${sick}` : '');
     nums.pop.chip.title = `ประชากร ${summary.pop || 0} · ที่อยู่อาศัยรองรับ ${summary.housing != null ? summary.housing : '-'}`;
     const h = summary.happiness != null ? summary.happiness : 1;
     setText(nums.happy.ic, happyFace(h));
