@@ -86,8 +86,24 @@ export const LOOKS = [
   { skin: 0xf0c8a8, hair: 0xc9a050, female: true },
   { skin: 0x9a6442, hair: 0x1a1410, female: true },
   { skin: 0xeab896, hair: 0x8a3a1c, beard: true },
-  { skin: 0xd9a27a, hair: 0x9a9a92, beard: true },   // older, grey
+  { skin: 0xd9a27a, hair: 0x9a9a92, beard: true, elder: true },
+  { skin: 0xe8bc9a, hair: 0x8a3a1c, female: true },
+  { skin: 0xc68a62, hair: 0x3a2618, female: true },
+  { skin: 0xf0c8a8, hair: 0xb8b8b0, female: true, elder: true },
+  { skin: 0x9a6442, hair: 0xa8a8a0, beard: false, elder: true },
+  { skin: 0xf2cdb0, hair: 0xd9b46a, beard: false },
 ];
+
+// Pick a look index that matches a villager's gender and age group, varied by id.
+const LOOK_GROUPS = {};
+LOOKS.forEach((l, i) => {
+  const k = `${l.female ? 'f' : 'm'}${l.elder ? 'e' : ''}`;
+  (LOOK_GROUPS[k] = LOOK_GROUPS[k] || []).push(i);
+});
+export function pickLook(gender, elder, seed) {
+  const group = LOOK_GROUPS[`${gender === 'f' ? 'f' : 'm'}${elder ? 'e' : ''}`];
+  return group[Math.abs(Math.floor(seed)) % group.length];
+}
 
 // ---------------------------------------------------------------- body parts (local space, origin = pivot)
 
@@ -298,6 +314,12 @@ const ITEM_BUILDERS = {
     add(l, sph(0.018), 0xe8c050, 0.03, -0.01, 0.09);                                         // coin peeking out
     return merge(l);
   },
+  cane: () => {
+    const l = [];
+    add(l, cyl(0.018, 0.022, 0.92), 0x6b4a2c, 0, -0.42, 0.06);
+    add(l, sph(0.035), 0x5c3f25, 0, 0.04, 0.06);
+    return merge(l);
+  },
   bighammer: () => tool(0.5, (l, hy, hz, a) => {
     add(l, cyl(0.055, 0.055, 0.2), 0x55595e, 0, hy, hz, a + Math.PI / 2);
   }),
@@ -353,6 +375,17 @@ const CARRY_BUILDERS = {
 
 // Each role: outfit + item. `look` (from LOOKS) supplies skin/hair/beard/gender.
 export const ROLES = {
+  child: {
+    name: 'เด็ก', tunic: 0xb8c88a, sleeve: 0xb8c88a, trousers: 0x8a7458, skirt: 0xc89a8a,
+    belt: 0x8a6a44, item: null,
+  },
+  elder: {
+    name: 'ผู้สูงอายุ', tunic: 0x8a7a68, sleeve: 0x8a7a68, trousers: 0x5b4a3a, skirt: 0x6e5e4e,
+    belt: 0x4a3320, item: 'cane',
+    extraTorso(l) {
+      add(l, cyl(0.2, 0.28, 0.36), 0x6b5a48, 0, 1.2, -0.02, 0, 0, 0, 1, 1, 0.86);   // warm shawl
+    },
+  },
   villager: {
     name: 'ชาวบ้าน', tunic: 0xcdbb94, sleeve: 0xcdbb94, trousers: 0x6b5a44, skirt: 0x8a7458,
     belt: 0x5c4630, item: null,
@@ -594,12 +627,21 @@ export function workPoseOf(roleKey) {
 }
 
 // Build the part geometries for a role in a given look.
-export function buildCharacter(roleKey, lookIndex = 0) {
-  const role = ROLES[roleKey];
+// opts: { pregnant, child } — pregnant adds a belly; child drops beards and adult extras.
+export function buildCharacter(roleKey, lookIndex = 0, opts = {}) {
+  const role = ROLES[roleKey] || ROLES.villager;
   const look = LOOKS[lookIndex % LOOKS.length];
   const o = { ...role, ...look, skin: look.skin, hair: look.hair, beard: role.beard || (look.beard && !role.bald) };
   if (role.sleeve === null) o.sleeve = look.skin;   // bare, rolled-up arms
-  if (look.female) o.hideBraid = !!role.extraHead && roleKey !== 'forager' && roleKey !== 'villager' && roleKey !== 'farmer';
+  if (look.female) o.hideBraid = !!role.extraHead && !['forager', 'villager', 'farmer', 'child', 'elder'].includes(roleKey);
+  if (opts.child) { o.beard = false; o.bald = false; }
+  if (opts.pregnant) {
+    const prev = o.extraTorso;
+    o.extraTorso = (l, oo) => {
+      if (prev) prev(l, oo);
+      add(l, sph(0.2), oo.skirt ?? oo.tunic, 0, 0.98, 0.1, 0, 0, 0, 1, 1.05, 1);   // rounded belly
+    };
+  }
   return {
     name: role.name,
     torso: torso(o),
@@ -626,8 +668,8 @@ export function characterMaterial() {
 }
 
 // Assemble a character as a Group of meshes for previews.
-export function makeCharacterGroup(roleKey, lookIndex = 0, carry = null) {
-  const c = buildCharacter(roleKey, lookIndex);
+export function makeCharacterGroup(roleKey, lookIndex = 0, carry = null, opts = {}) {
+  const c = buildCharacter(roleKey, lookIndex, opts);
   const mat = characterMaterial();
   const g = new THREE.Group();
   const mesh = (geo) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; return m; };

@@ -1,8 +1,8 @@
 // Turntable gallery of every character in src/render/characters.js.
 // ?pose=walk|work|idle  ?look=N (all roles in one look)  ?looks=1 (one role in every look, ?role=key)
-// ?carry=1 (show every carried good)  ?set=new|old (subset of roles)
+// ?carry=1 (show every carried good)  ?set=new|old|family (subset of roles)
 import * as THREE from '../vendor/three.module.js';
-import { ROLES, LOOKS, CARRY_KINDS, makeCharacterGroup, applyPose, workPoseOf } from '../src/render/characters.js';
+import { ROLES, LOOKS, CARRY_KINDS, makeCharacterGroup, applyPose, workPoseOf, pickLook } from '../src/render/characters.js';
 
 const params = new URLSearchParams(location.search);
 const pose = params.get('pose') || 'idle';
@@ -38,6 +38,14 @@ let entries;
 if (params.get('looks')) {
   const role = params.get('role') || 'villager';
   entries = LOOKS.map((_, i) => ({ role, look: i, carry: null }));
+} else if (params.get('set') === 'family') {
+  // a three-generation family: grandparents, parents (mother pregnant), children of several ages
+  entries = [
+    { role: 'elder', look: pickLook('m', true, 0) }, { role: 'elder', look: pickLook('f', true, 0) },
+    { role: 'woodcutter', look: pickLook('m', false, 0) }, { role: 'weaver', look: pickLook('f', false, 1), pregnant: true },
+    { role: 'child', look: pickLook('m', false, 2), age: 12 }, { role: 'child', look: pickLook('f', false, 3), age: 7 },
+    { role: 'child', look: pickLook('m', false, 4), age: 3 },
+  ].map((e) => ({ carry: null, ...e }));
 } else if (params.get('carry')) {
   entries = CARRY_KINDS.map((res, i) => ({ role: 'villager', look: i, carry: res }));
 } else {
@@ -49,12 +57,20 @@ if (params.get('looks')) {
 const SPACING = 1.25;
 const chars = entries.map((e, i) => {
   const workKind = workPoseOf(e.role);
-  const g = makeCharacterGroup(e.role, e.look, e.carry);
+  const isChild = e.age != null;
+  const g = makeCharacterGroup(e.role, e.look, e.carry, { pregnant: !!e.pregnant, child: isChild });
+  if (isChild) {
+    const k = 0.5 + 0.45 * (e.age / 14);
+    g.scale.setScalar(k);
+    g.userData.parts.head.scale.setScalar(1 + 0.35 * (1 - e.age / 14));
+  }
+  if (e.role === 'elder') g.rotation.x = 0.12;
   const root = new THREE.Group();
   root.position.x = (i - (entries.length - 1) / 2) * SPACING;
   root.add(g);
   scene.add(root);
-  return { root, g, workKind, label: e.carry ? e.carry : g.userData.name };
+  const label = e.carry ? e.carry : e.pregnant ? 'ตั้งครรภ์' : isChild ? `เด็ก ${e.age} ขวบ` : g.userData.name;
+  return { root, g, workKind, label };
 });
 
 const labels = document.getElementById('labels');

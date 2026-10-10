@@ -3,7 +3,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { heightAt } from '../terrain.js';
 import {
-  PIVOTS, LOOKS, JOB_ROLE, CARRY_KINDS, buildCharacter, buildCarry, characterMaterial, poseAngles, workPoseOf,
+  PIVOTS, JOB_ROLE, pickLook, CARRY_KINDS, buildCharacter, buildCarry, characterMaterial, poseAngles, workPoseOf,
 } from './characters.js';
 
 const SCALE = 1.2;               // characters are life-size; scale up a touch for readability
@@ -19,13 +19,24 @@ function hash(id, k) {
   return x - Math.floor(x);
 }
 
-function roleOf(v, byId) {
+const CHILD_AGE = 14;
+const ELDER_AGE = 55;
+
+// Life stage + appearance inputs; tolerant of villagers saved before families existed.
+function lifeOf(v) {
+  const age = v.age ?? 30;
+  const gender = v.gender ?? (hash(v.id, 5) < 0.5 ? 'm' : 'f');
+  return { age, gender, child: age < CHILD_AGE, elder: age >= ELDER_AGE, pregnant: !!v.pregnant };
+}
+
+function roleOf(v, byId, life) {
+  if (life.child) return 'child';
   if (v.role === 'builder') return 'builder';
   if (v.jobId != null) {
     const b = byId.get(v.jobId);
     if (b && JOB_ROLE[b.type]) return JOB_ROLE[b.type];
   }
-  return 'villager';
+  return life.elder ? 'elder' : 'villager';
 }
 
 export function createVillagerView(parent) {
@@ -47,11 +58,11 @@ export function createVillagerView(parent) {
     return m;
   }
 
-  function variant(role, look) {
-    const key = `${role}|${look}`;
+  function variant(role, look, pregnant, child) {
+    const key = `${role}|${look}|${pregnant ? 1 : 0}|${child ? 1 : 0}`;
     let v = variants.get(key);
     if (!v) {
-      const geos = buildCharacter(role, look);
+      const geos = buildCharacter(role, look, { pregnant, child });
       v = { geos, meshes: {}, cap: START_CAP, n: 0 };
       for (const p of PARTS) if (geos[p]) v.meshes[p] = makeMesh(geos[p], v.cap);
       variants.set(key, v);
@@ -138,7 +149,8 @@ export function createVillagerView(parent) {
 
       const task = v.queue && v.queue[0] ? v.queue[0].kind : null;
       const carrying = !!v.carry;
-      const role = roleOf(v, byId);
+      const life = lifeOf(v);
+      const role = roleOf(v, byId, life);
       let kind = 'idle';
       let phase = time * 1.0 + v.id;
       if (v.sick) { kind = 'sick'; phase = m.phase; }
@@ -149,18 +161,22 @@ export function createVillagerView(parent) {
       }
       const a = poseAngles(kind, phase, carrying);
 
-      const sc = SCALE * (0.92 + hash(v.id, 3) * 0.16);
-      e.set(v.sick ? 0.22 : 0, m.yaw, 0, 'YXZ');   // sick villagers walk hunched
+      // children grow from ~half size; elders stoop a little, the sick a lot
+      const grow = life.child ? 0.5 + 0.45 * (life.age / CHILD_AGE) : 0.92 + hash(v.id, 3) * 0.16;
+      const sc = SCALE * grow;
+      const stoop = v.sick ? 0.22 : life.elder ? 0.12 : 0;
+      e.set(stoop, m.yaw, 0, 'YXZ');
       q.setFromEuler(e);
       base.compose(p.set(v.x, heightAt(state.terrain, v.x, v.z) + a.bob, v.z), q, s.set(sc, sc, sc));
 
-      const look = Math.floor(hash(v.id, 4) * LOOKS.length);
-      const vb = variant(role, look);
+      const look = pickLook(life.gender, life.elder, hash(v.id, 4) * 1000);
+      const vb = variant(role, look, life.pregnant && life.gender === 'f', life.child);
       const i = vb.n++;
       const M = vb.meshes;
       put(M.torso, i, [0, 0, 0], 0, 0);
       e.set(0, a.head, 0, 'XYZ'); q.setFromEuler(e);
-      local.compose(p.set(...PIVOTS.neck), q, ONE);
+      const headScale = life.child ? 1 + 0.35 * (1 - life.age / CHILD_AGE) : 1;   // kids have big heads
+      local.compose(p.set(...PIVOTS.neck), q, s.set(headScale, headScale, headScale));
       out.multiplyMatrices(base, local);
       M.head.setMatrixAt(i, out);
       M.head.setColorAt(i, v.sick ? SICK_TINT : WHITE);
