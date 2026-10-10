@@ -1,21 +1,16 @@
 // Syncs the simulation state onto three.js objects: buildings, nodes, villagers, zones.
 import * as THREE from '../../vendor/three.module.js';
-import { BUILDINGS, NODE_COUNTS, NODE_AMOUNT } from '../config.js';
+import { BUILDINGS } from '../config.js';
 import { heightAt } from '../terrain.js';
 import {
-  makeBuildingModel, makeSiteModel, NODE_MODELS, WINDOW_MATERIALS,
+  makeBuildingModel, makeSiteModel, WINDOW_MATERIALS,
 } from './models.js';
+import { createNodesView, createGroundDetail } from './nature.js';
+import { createSmoke, createFireflies } from './effects.js';
 import { createVillagerView } from './villagerView.js';
 
-const NODE_REFRESH = 0.5; // seconds between node instance rebuilds
 const NIGHT_GLOW = 1.2;
 
-
-// Deterministic pseudo-random in [0,1) from an integer id and a salt.
-function rnd(id, salt) {
-  const s = Math.sin(id * 127.1 + salt * 311.7) * 43758.5453;
-  return s - Math.floor(s);
-}
 
 // Flat translucent disc that hugs the terrain (rings of vertices sampled from heightAt).
 function makeZoneGeometry(terrain, x, z, r) {
@@ -65,59 +60,28 @@ export function createWorldView(scene, terrain) {
   let night = false;
   let highlightId = null;
   let clock = 0;
-  let nodeTimer = NODE_REFRESH;  // refresh on first sync
 
-  // ------------------------------------------------------------ nodes
-  const nodeMeshes = {};
-  for (const kind of ['tree', 'rock', 'berry']) {
-    const cap = Math.ceil(NODE_COUNTS[kind] * 1.3) + 32;
-    const mesh = new THREE.InstancedMesh(NODE_MODELS[kind].geometry, NODE_MODELS[kind].material, cap);
-    mesh.count = 0;
-    mesh.frustumCulled = false;
-    mesh.castShadow = true;
-    mesh.receiveShadow = kind !== 'tree';
-    mesh.name = `nodes-${kind}`;
-    root.add(mesh);
-    nodeMeshes[kind] = mesh;
-  }
+  // ------------------------------------------------------------ nature & effects
+  const nodesView = createNodesView(root, terrain);
+  const groundDetail = createGroundDetail(root, terrain);
+  const smoke = createSmoke(root);
+  const fireflies = createFireflies(root, { heightAt: (x, z) => heightAt(terrain, x, z) });
+  let smokeDirty = true;
+  const _v = new THREE.Vector3();
+  const fireflyFocus = new THREE.Vector3();
 
-  const _m = new THREE.Matrix4();
-  const _q = new THREE.Quaternion();
-  const _e = new THREE.Euler();
-  const _p = new THREE.Vector3();
-  const _s = new THREE.Vector3();
-  const _c = new THREE.Color();
-  const Y_AXIS = new THREE.Vector3(0, 1, 0);
-
-  function refreshNodes(nodes) {
-    const counts = { tree: 0, rock: 0, berry: 0 };
-    for (const n of nodes) {
-      const mesh = nodeMeshes[n.kind];
-      if (!mesh) continue;
-      const i = counts[n.kind];
-      if (i >= mesh.instanceMatrix.count) continue;
-      counts[n.kind]++;
-      let s;
-      if (n.kind === 'tree') s = 0.8 + rnd(n.id, 1) * 0.5;
-      else if (n.kind === 'rock') s = (0.7 + rnd(n.id, 1) * 0.6) * (0.6 + 0.4 * Math.min(1, n.amount / NODE_AMOUNT.rock));
-      else s = 0.45 + 0.75 * Math.min(1, Math.max(0, n.amount / NODE_AMOUNT.berry));
-      _q.setFromAxisAngle(Y_AXIS, rnd(n.id, 2) * Math.PI * 2);
-      _p.set(n.x, heightAt(terrain, n.x, n.z) - 0.05, n.z);
-      _s.set(s, n.kind === 'tree' ? s * (0.9 + rnd(n.id, 3) * 0.3) : s, s);
-      _m.compose(_p, _q, _s);
-      mesh.setMatrixAt(i, _m);
-      if (n.kind === 'tree') {
-        const v = 0.85 + rnd(n.id, 4) * 0.3;
-        _c.setRGB(v * (0.95 + rnd(n.id, 5) * 0.1), v, v * (0.9 + rnd(n.id, 6) * 0.15));
-        mesh.setColorAt(i, _c);
-      }
+  // Chimney tops of finished buildings, in world space.
+  function refreshSmoke() {
+    const sources = [];
+    for (const { group } of buildings.values()) {
+      const model = group.userData.model;
+      const chimneys = model && model.userData.chimneys;
+      if (!chimneys || group.userData.ghost) continue;
+      group.updateMatrixWorld(true);
+      for (const c of chimneys) sources.push(model.localToWorld(_v.set(c.x, c.y, c.z)).clone());
     }
-    for (const kind of Object.keys(nodeMeshes)) {
-      const mesh = nodeMeshes[kind];
-      mesh.count = counts[kind];
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    }
+    smoke.setSources(sources);
+    smokeDirty = false;
   }
 
   // ------------------------------------------------------------ villagers
@@ -152,6 +116,7 @@ export function createWorldView(scene, terrain) {
     if (solid) {
       const model = makeBuildingModel(b.type, { level: b.level || 1, stage: b.stage || 0, seed: b.id });
       group.add(model);
+      group.userData.model = model;
       const sails = model.getObjectByName('sails') || model.getObjectByName('sawblade');
       if (sails) group.userData.sails = sails;
     }
@@ -181,6 +146,7 @@ export function createWorldView(scene, terrain) {
         entry = { group: buildGroup(b), signature: sig };
         buildings.set(b.id, entry);
         root.add(entry.group);
+        smokeDirty = true;
       }
       const g = entry.group;
       g.position.set(b.x, heightAt(terrain, b.x, b.z), b.z);
@@ -197,6 +163,7 @@ export function createWorldView(scene, terrain) {
         root.remove(entry.group);
         disposeGroup(entry.group);
         buildings.delete(id);
+        smokeDirty = true;
         if (highlightId === id) highlightId = null;
       }
     }
@@ -263,11 +230,13 @@ export function createWorldView(scene, terrain) {
     syncBuildings(state, dt);
     syncZones(state);
 
-    nodeTimer += dt;
-    if (nodeTimer >= NODE_REFRESH) {
-      nodeTimer = 0;
-      refreshNodes(state.nodes);
-    }
+    nodesView.update(state, dt);
+    groundDetail.update(state, dt);
+    if (smokeDirty) refreshSmoke();
+    smoke.update(dt, night);
+    const th = state.buildings.find((b) => b.type === 'townhall');
+    if (th) fireflyFocus.set(th.x, heightAt(terrain, th.x, th.z), th.z);
+    fireflies.update(dt, night, fireflyFocus);
     villagerView.update(state, dt, clock);
     updateHighlight(state);
   }
@@ -299,7 +268,7 @@ export function createWorldView(scene, terrain) {
     buildings.clear();
     for (const { mesh } of zoneMeshes.values()) { root.remove(mesh); mesh.geometry.dispose(); }
     zoneMeshes.clear();
-    for (const mesh of Object.values(nodeMeshes)) { root.remove(mesh); mesh.dispose(); }
+    nodesView.dispose(); groundDetail.dispose(); smoke.dispose(); fireflies.dispose();
     villagerView.dispose();
     ring.geometry.dispose(); ring.material.dispose();
     zoneMats.residential.dispose(); zoneMats.field.dispose();

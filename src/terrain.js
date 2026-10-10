@@ -9,7 +9,7 @@ const VERTS = GRID + 1;
 const FLAT_FULL = 20;   // full flattening within this distance of spawn
 const FLAT_END = 35;    // no flattening beyond this distance
 const RIVER_BED = -0.6;
-const RIVER_BANK = RIVER_WIDTH / 2 + 3;
+const RIVER_SLOPE = 12;  // width of the sloping bank beyond the water's edge
 const FOREST_TREE = 0.55;
 const FOREST_BERRY_MIN = 0.42;
 
@@ -47,7 +47,8 @@ function buildHeights(seed, riverZ) {
       // weight 1 inside FLAT_FULL, smoothly 0 at FLAT_END
       const flat = 1 - smoothstep((dist - FLAT_FULL) / (FLAT_END - FLAT_FULL));
       h = h * (1 - flat) + spawnBase * flat;
-      const bank = 1 - smoothstep(Math.abs(z - riverZ(x)) / RIVER_BANK);
+      // flat river bed across the full water width, then banks easing up over RIVER_SLOPE metres
+      const bank = 1 - smoothstep((Math.abs(z - riverZ(x)) - RIVER_WIDTH / 2) / RIVER_SLOPE);
       h = h * (1 - bank) + RIVER_BED * bank;
       heights[iz * VERTS + ix] = h;
     }

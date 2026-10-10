@@ -9,13 +9,17 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 // Keyframes over sun elevation e in [-1, 1]. Each stop: [e, value]; values are lerped.
-const SKY = [[-1, 0x1a2648], [-0.25, 0x22305a], [0, 0xf0985a], [0.5, 0x8fc4ee], [1, 0x8fc4ee]];
-const SUN_COLOR = [[-1, 0x8fa3dc], [-0.1, 0x8fa3dc], [0, 0xffa860], [0.5, 0xfff1d6], [1, 0xfff1d6]];
+// Sky is a gradient dome: horizon colour (also the fog colour, so distance melts into the sky) and zenith colour.
+const SKY_HORIZON = [[-1, 0x24325e], [-0.25, 0x2c3d6c], [-0.05, 0x8f6f86], [0.04, 0xf6a064], [0.25, 0xf0cfa0], [0.55, 0xb6d6f0], [1, 0xbcdcf2]];
+const SKY_ZENITH = [[-1, 0x0b1334], [-0.25, 0x131d44], [-0.05, 0x2c3a72], [0.04, 0x3d58a8], [0.3, 0x3f7fd2], [1, 0x2f78d2]];
+const SUN_COLOR = [[-1, 0x8fa3dc], [-0.1, 0x8fa3dc], [0, 0xffa24f], [0.2, 0xffd096], [0.5, 0xfff1d6], [1, 0xfff1d6]];
 // Intensities are ~pi x the old "legacy" values: three r155+ divides diffuse light by pi.
-const SUN_INTENSITY = [[-1, 1.1], [-0.25, 0.9], [0, 1.3], [0.5, 2.3], [1, 2.5]];
+const SUN_INTENSITY = [[-1, 1.1], [-0.25, 0.9], [0, 1.3], [0.2, 1.9], [0.5, 2.3], [1, 2.5]];
 const HEMI_SKY = [[-1, 0x6a7fb8], [-0.25, 0x6a7fb8], [0, 0xffc8a0], [0.5, 0xcfe4ff], [1, 0xcfe4ff]];
-const HEMI_GROUND = [[-1, 0x3a4256], [-0.25, 0x3a4256], [0, 0x5a4634], [0.5, 0x6b5a40], [1, 0x6b5a40]];
+const HEMI_GROUND = [[-1, 0x3a4256], [-0.25, 0x3a4256], [0, 0x6a5238], [0.5, 0x7a6444], [1, 0x7a6444]];
 const HEMI_INTENSITY = [[-1, 1.1], [-0.25, 1.0], [0, 0.9], [0.5, 1.05], [1, 1.1]];
+// Filmic tone mapping darkens; lift exposure a touch at night so the moonlit village stays readable.
+const EXPOSURE = [[-1, 1.18], [-0.25, 1.12], [0, 1.0], [0.5, 0.95], [1, 0.95]];
 
 const _a = new THREE.Color();
 const _b = new THREE.Color();
@@ -47,6 +51,79 @@ function sampleNumber(stops, e) {
   return stops[stops.length - 1][1];
 }
 
+
+// ---------------------------------------------------------------- sky dome
+const SKY_VERT = `
+varying vec3 vDir;
+void main() {
+  vDir = position;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+}`;
+
+const SKY_FRAG = `
+uniform vec3 uZenith;
+uniform vec3 uHorizon;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform float uGlow;
+uniform float uNight;
+varying vec3 vDir;
+float hash13( vec3 p ) {
+  p = fract( p * 0.1031 );
+  p += dot( p, p.zyx + 31.32 );
+  return fract( ( p.x + p.y ) * p.z );
+}
+void main() {
+  vec3 d = normalize( vDir );
+  float h = d.y;
+  float t = smoothstep( -0.02, 0.8, h );
+  vec3 col = mix( uHorizon, uZenith, pow( t, 0.5 ) );
+  col = mix( col, uHorizon, smoothstep( 0.0, -0.25, h ) );
+  // soft haze hugging the horizon
+  col = mix( col, uHorizon, exp( -abs( h ) * 8.0 ) * 0.3 );
+  // sun / moon glow and disc
+  float sd = max( dot( d, normalize( uSunDir ) ), 0.0 );
+  col += uSunColor * ( pow( sd, 5.0 ) * 0.16 + pow( sd, 48.0 ) * 0.32 ) * uGlow;
+  col += uSunColor * smoothstep( 0.99935, 0.99975, sd ) * 1.4 * ( 0.5 + 0.5 * uGlow );
+  // a few stars when it is dark
+  if ( uNight > 0.01 && h > 0.02 ) {
+    vec3 p = d * 120.0;
+    vec3 id = floor( p );
+    float r = hash13( id );
+    float star = step( 0.994, r ) * smoothstep( 0.45, 0.0, length( fract( p ) - 0.5 ) );
+    col += vec3( 0.85, 0.9, 1.0 ) * star * uNight * smoothstep( 0.02, 0.35, h ) * ( 0.6 + 0.4 * hash13( id + 7.0 ) );
+  }
+  gl_FragColor = vec4( col, 1.0 );
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
+
+function createSkyDome() {
+  const geo = new THREE.SphereGeometry(900, 32, 20);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uZenith: { value: new THREE.Color(0x3c82d6) },
+      uHorizon: { value: new THREE.Color(0xc2e0f2) },
+      uSunDir: { value: new THREE.Vector3(0.4, 0.8, 0.4).normalize() },
+      uSunColor: { value: new THREE.Color(0xfff1d6) },
+      uGlow: { value: 1 },
+      uNight: { value: 0 },
+    },
+    vertexShader: SKY_VERT,
+    fragmentShader: SKY_FRAG,
+    side: THREE.BackSide,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+  });
+  const dome = new THREE.Mesh(geo, mat);
+  dome.name = 'sky';
+  dome.frustumCulled = false;
+  dome.renderOrder = -1000;
+  dome.onBeforeRender = (renderer, scene, camera) => { dome.position.copy(camera.position); };
+  return dome;
+}
+
 export function createScene(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -55,10 +132,13 @@ export function createScene(canvas) {
   // Filmic tone mapping gives the warm, painterly look the textured models are authored for.
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.95;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x8fc4ee);
-  scene.fog = new THREE.Fog(0x8fc4ee, 140, 440);
+  scene.background = new THREE.Color(0xc2e0f2);
+  scene.fog = new THREE.Fog(0xc2e0f2, 140, 440);
+  const dome = createSkyDome();
+  scene.add(dome);
 
   const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 1200);
   camera.position.set(WORLD_SIZE / 2, 60, WORLD_SIZE / 2 + 60);
@@ -72,8 +152,9 @@ export function createScene(canvas) {
   const sc = sun.shadow.camera;
   sc.left = -SHADOW_HALF; sc.right = SHADOW_HALF; sc.top = SHADOW_HALF; sc.bottom = -SHADOW_HALF;
   sc.near = 10; sc.far = SUN_DISTANCE * 2.4;
-  sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.35;
+  sun.shadow.bias = -0.0005;     // small, with a generous normalBias: no acne on roofs / terrain facets
+  sun.shadow.normalBias = 0.32;
+  sun.shadow.radius = 2;
   scene.add(sun);
   scene.add(sun.target);
 
@@ -105,10 +186,17 @@ export function createScene(canvas) {
     }
     sunDir.set(Math.cos(a), Math.max(0.15, Math.sin(a) * 0.95 + 0.05), 0.4).normalize();
 
-    sampleColor(SKY, e, _a);
-    const sky = _a.clone();
-    scene.background.copy(sky);
-    scene.fog.color.copy(sky);
+    const u = dome.material.uniforms;
+    sampleColor(SKY_HORIZON, e, _a);
+    scene.background.copy(_a);
+    scene.fog.color.copy(_a);   // fog == dome horizon, so distant terrain melts into the sky
+    u.uHorizon.value.copy(_a);
+    sampleColor(SKY_ZENITH, e, u.uZenith.value);
+    u.uSunDir.value.copy(sunDir);
+    sampleColor(SUN_COLOR, e, u.uSunColor.value);
+    u.uGlow.value = e > 0 ? 1 : 0.45;
+    u.uNight.value = clamp01((-e - 0.05) / 0.3);
+    renderer.toneMappingExposure = sampleNumber(EXPOSURE, e);
     scene.fog.near = lerp(60, 140, clamp01((e + 0.25) / 0.75));
     scene.fog.far = lerp(300, 440, clamp01((e + 0.25) / 0.75));
 
