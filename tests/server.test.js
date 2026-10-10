@@ -217,12 +217,30 @@ test('failed-password limit per account applies across addresses but only counts
   assert.equal(await post('/api/register', { email: 'target@example.com', password: 'right-password' }, '10.1.0.1'), 200);
   // unknown emails never create per-account counters
   for (let i = 0; i < 10; i++) assert.equal(await post('/api/login', { email: `nobody${i}@example.com`, password: 'x'.repeat(8) }, `10.2.0.${i}`), 401);
-  // a correct login does not count toward the limit
-  assert.equal(await post('/api/login', { email: 'target@example.com', password: 'right-password' }, '10.3.0.1'), 200);
+  // failures from many addresses hit the per-account ceiling (2 × max)
   const statuses = [];
   for (let i = 0; i < 8; i++) statuses.push(await post('/api/login', { email: 'target@example.com', password: 'wrong' + i }, `10.4.0.${i}`));
+  assert.deepEqual(statuses, [401, 401, 401, 401, 401, 401, 429, 429]);
   limited.close();
-  assert.deepEqual(statuses, [401, 401, 401, 401, 401, 401, 429, 429]);   // failure ceiling = 2 × max
+});
+
+test('parallel wrong passwords cannot exceed the per-account limit; success resets it', async () => {
+  const limited = createServer(createApp({ db, rootDir: ROOT, trustProxy: true, authLimit: { max: 3, windowMs: 60_000 } }));
+  await new Promise((r) => limited.listen(0, '127.0.0.1', r));
+  const port = limited.address().port;
+  const post = (body, ip) => fetch(`http://127.0.0.1:${port}/api/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Real-IP': ip }, body: JSON.stringify(body),
+  }).then((r) => r.status);
+  await fetch(`http://127.0.0.1:${port}/api/register`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Real-IP': '10.9.0.1' },
+    body: JSON.stringify({ email: 'parallel@example.com', password: 'right-password' }),
+  });
+  // a success first, then a burst of 20 concurrent wrong guesses from 20 addresses
+  assert.equal(await post({ email: 'parallel@example.com', password: 'right-password' }, '10.9.0.2'), 200);
+  const burst = await Promise.all(Array.from({ length: 20 }, (_, i) => post({ email: 'parallel@example.com', password: 'bad' + i }, `10.8.${i}.1`)));
+  limited.close();
+  assert.equal(burst.filter((s) => s === 401).length, 6);   // only 2 × max guesses were actually checked
+  assert.equal(burst.filter((s) => s === 429).length, 14);
 });
 
 test('ipKey groups IPv6 /64s regardless of notation', () => {

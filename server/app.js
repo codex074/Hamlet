@@ -29,10 +29,13 @@ class HttpError extends Error {
 }
 
 export function createApp({ db, rootDir, googleClientId = null, googleVerify = null, trustProxy = false, authLimit = AUTH_LIMIT }) {
-  const ipLimiter = createLimiter(authLimit);
-  // Failed passwords per existing account: higher ceiling, failures only, so an attacker cannot cheaply lock
-  // someone out — and Google sign-in is never affected by it.
-  const failLimiter = createLimiter({ max: authLimit.max * 2, windowMs: authLimit.windowMs });
+  // Per-address limit. If its table ever fills with live keys it lets new addresses through (fail open) —
+  // accounts stay protected by the per-account limiter below, which cannot be flooded.
+  const ipLimiter = createLimiter({ ...authLimit, whenFull: 'allow' });
+  // Password attempts per EXISTING account (keys are bounded by the number of users, so no table limit).
+  // The attempt is recorded before the password check, so parallel requests cannot slip past it; a successful
+  // login clears it. Google sign-in is never affected.
+  const attemptLimiter = createLimiter({ max: authLimit.max * 2, windowMs: authLimit.windowMs, maxKeys: Infinity });
   const tooMany = () => new HttpError(429, 'ลองหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่');
 
   function rateLimit(ip) { if (!ipLimiter.hit(ipKey(ip))) throw tooMany(); }
@@ -146,12 +149,10 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
         await burnPasswordCheck(password);
         throw new HttpError(401, user ? 'บัญชีนี้ใช้การเข้าสู่ระบบด้วย Google' : 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
       }
-      const failKey = `user:${user.id}`;
-      if (failLimiter.count(failKey) >= failLimiter.max) throw tooMany();
-      if (!(await verifyPassword(password, user.password_hash))) {
-        failLimiter.hit(failKey);
-        throw new HttpError(401, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
-      }
+      const attemptKey = `user:${user.id}`;
+      if (!attemptLimiter.hit(attemptKey)) throw tooMany();
+      if (!(await verifyPassword(password, user.password_hash))) throw new HttpError(401, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      attemptLimiter.clear(attemptKey);
       startSession(req, res, user);
       return { user: publicUser(user) };
     }
@@ -284,29 +285,32 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
   };
 }
 
-// Sliding-window limiter with a bounded table. Expired keys are pruned; when the table is still full of live
-// keys, NEW keys are refused (fail closed) rather than evicting live counters, so flooding cannot reset anyone.
-function createLimiter({ max, windowMs, maxKeys = 20000 }) {
+// Sliding-window limiter. hit() records synchronously (no await between check and record), so concurrent
+// requests are counted one by one. With a bounded table, expired keys are pruned at most once a second;
+// if it is still full of live keys, `whenFull` decides what a NEW key gets: 'allow' (fail open) or 'deny'.
+function createLimiter({ max, windowMs, maxKeys = 20000, whenFull = 'deny' }) {
   const hits = new Map();
+  let lastPrune = 0;
   const live = (key, now) => (hits.get(key) || []).filter((t) => now - t < windowMs);
   function prune(now) {
+    if (now - lastPrune < 1000) return;
+    lastPrune = now;
     for (const [k, ts] of hits) if (now - ts[ts.length - 1] >= windowMs) hits.delete(k);
   }
   return {
-    max,
-    count(key) { return live(key, Date.now()).length; },
-    // Records a hit; returns false when the key is over its limit (or cannot be tracked).
+    // Records a hit; returns false when the key is over its limit.
     hit(key) {
       const now = Date.now();
       if (!hits.has(key) && hits.size >= maxKeys) {
         prune(now);
-        if (hits.size >= maxKeys) return false;
+        if (hits.size >= maxKeys) return whenFull === 'allow';
       }
       const list = live(key, now);
       list.push(now);
       hits.set(key, list);
       return list.length <= max;
     },
+    clear(key) { hits.delete(key); },
   };
 }
 
