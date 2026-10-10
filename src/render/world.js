@@ -3,31 +3,13 @@ import * as THREE from '../../vendor/three.module.js';
 import { BUILDINGS, NODE_COUNTS, NODE_AMOUNT } from '../config.js';
 import { heightAt } from '../terrain.js';
 import {
-  makeBuildingModel, makeSiteModel, NODE_MODELS, VILLAGER_MODEL, CARRY_MODEL, WINDOW_MATERIALS,
+  makeBuildingModel, makeSiteModel, NODE_MODELS, WINDOW_MATERIALS,
 } from './models.js';
+import { createVillagerView } from './villagerView.js';
 
-const VILLAGER_CAP = 300;
 const NODE_REFRESH = 0.5; // seconds between node instance rebuilds
 const NIGHT_GLOW = 1.2;
 
-const ROLE_COLORS = {
-  builder: new THREE.Color(0xe08a30),
-  idle: new THREE.Color(0x9a9a9a),
-  resource: new THREE.Color(0x4f9a4a),
-  production: new THREE.Color(0x4a78c8),
-  service: new THREE.Color(0x8a5ab8),
-  worker: new THREE.Color(0x6aa0a0),
-};
-const RES_COLORS = {
-  wood: new THREE.Color(0x8b5a2b),
-  planks: new THREE.Color(0xd2a56b),
-  stone: new THREE.Color(0x9a9a9a),
-  berries: new THREE.Color(0xb0204a),
-  wheat: new THREE.Color(0xe3c34a),
-  flour: new THREE.Color(0xf5f0e0),
-  bread: new THREE.Color(0xc98a3b),
-};
-const WHITE = new THREE.Color(0xffffff);
 
 // Deterministic pseudo-random in [0,1) from an integer id and a salt.
 function rnd(id, salt) {
@@ -139,79 +121,7 @@ export function createWorldView(scene, terrain) {
   }
 
   // ------------------------------------------------------------ villagers
-  const VILLAGER_SCALE = 1.35; // readable at the default zoom
-  const villagerMesh = new THREE.InstancedMesh(VILLAGER_MODEL.geometry, VILLAGER_MODEL.material, VILLAGER_CAP);
-  villagerMesh.count = 0;
-  villagerMesh.frustumCulled = false;
-  villagerMesh.castShadow = true;
-  villagerMesh.name = 'villagers';
-  villagerMesh.setColorAt(0, WHITE); // allocate instanceColor
-  root.add(villagerMesh);
-
-  const carryMesh = new THREE.InstancedMesh(CARRY_MODEL.geometry, CARRY_MODEL.material, VILLAGER_CAP);
-  carryMesh.count = 0;
-  carryMesh.frustumCulled = false;
-  carryMesh.castShadow = true;
-  carryMesh.name = 'carried';
-  carryMesh.setColorAt(0, WHITE);
-  root.add(carryMesh);
-
-  const lastPos = new Map(); // villager id -> { x, z, yaw, moving }
-
-  function syncVillagers(state, dt) {
-    const byId = new Map();
-    for (const b of state.buildings) byId.set(b.id, b);
-    let n = 0;
-    let nc = 0;
-    const seen = new Set();
-    for (const v of state.villagers) {
-      if (n >= VILLAGER_CAP) break;
-      seen.add(v.id);
-      let lp = lastPos.get(v.id);
-      if (!lp) { lp = { x: v.x, z: v.z, yaw: rnd(v.id, 9) * Math.PI * 2, moving: 0 }; lastPos.set(v.id, lp); }
-      const dx = v.x - lp.x;
-      const dz = v.z - lp.z;
-      const moved = Math.hypot(dx, dz);
-      if (moved > 0.002) lp.yaw = Math.atan2(dx, dz);
-      lp.moving = moved > 0.002 ? 1 : 0;
-      lp.x = v.x;
-      lp.z = v.z;
-      if (v.role === 'sleeping') continue;
-
-      let color = ROLE_COLORS.idle;
-      if (v.role === 'builder') color = ROLE_COLORS.builder;
-      else if (v.role === 'worker') {
-        const jb = v.jobId != null ? byId.get(v.jobId) : null;
-        const cat = jb ? BUILDINGS[jb.type]?.category : null;
-        color = ROLE_COLORS[cat] || ROLE_COLORS.worker;
-      }
-
-      const bob = lp.moving ? Math.abs(Math.sin(clock * 9 + v.id)) * 0.09 : 0;
-      const y = heightAt(terrain, v.x, v.z) + bob;
-      _q.setFromAxisAngle(Y_AXIS, lp.yaw);
-      _p.set(v.x, y, v.z);
-      _s.set(VILLAGER_SCALE, VILLAGER_SCALE, VILLAGER_SCALE);
-      _m.compose(_p, _q, _s);
-      villagerMesh.setMatrixAt(n, _m);
-      villagerMesh.setColorAt(n, color);
-      n++;
-
-      if (v.carry && nc < VILLAGER_CAP) {
-        _p.set(v.x, y + 1.95 * VILLAGER_SCALE, v.z);
-        _m.compose(_p, _q, _s);
-        carryMesh.setMatrixAt(nc, _m);
-        carryMesh.setColorAt(nc, RES_COLORS[v.carry.res] || WHITE);
-        nc++;
-      }
-    }
-    if (lastPos.size > seen.size) for (const id of lastPos.keys()) if (!seen.has(id)) lastPos.delete(id);
-    villagerMesh.count = n;
-    carryMesh.count = nc;
-    villagerMesh.instanceMatrix.needsUpdate = true;
-    carryMesh.instanceMatrix.needsUpdate = true;
-    if (villagerMesh.instanceColor) villagerMesh.instanceColor.needsUpdate = true;
-    if (carryMesh.instanceColor) carryMesh.instanceColor.needsUpdate = true;
-  }
+  const villagerView = createVillagerView(root);
 
   // ------------------------------------------------------------ buildings
   function ghostify(group) {
@@ -358,7 +268,7 @@ export function createWorldView(scene, terrain) {
       nodeTimer = 0;
       refreshNodes(state.nodes);
     }
-    syncVillagers(state, dt);
+    villagerView.update(state, dt, clock);
     updateHighlight(state);
   }
 
@@ -390,8 +300,7 @@ export function createWorldView(scene, terrain) {
     for (const { mesh } of zoneMeshes.values()) { root.remove(mesh); mesh.geometry.dispose(); }
     zoneMeshes.clear();
     for (const mesh of Object.values(nodeMeshes)) { root.remove(mesh); mesh.dispose(); }
-    root.remove(villagerMesh); villagerMesh.dispose();
-    root.remove(carryMesh); carryMesh.dispose();
+    villagerView.dispose();
     ring.geometry.dispose(); ring.material.dispose();
     zoneMats.residential.dispose(); zoneMats.field.dispose();
     scene.remove(root);
