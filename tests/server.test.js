@@ -206,3 +206,20 @@ test('rate limiting kicks in on repeated logins', async () => {
   limited.close();
   assert.deepEqual(statuses, [401, 401, 401, 429, 429]);
 });
+
+test('per-account limit applies even when the address changes', async () => {
+  const limited = createServer(createApp({ db, rootDir: ROOT, trustProxy: true, authLimit: { max: 3, windowMs: 60_000 } }));
+  await new Promise((r) => limited.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${limited.address().port}/api/login`;
+  const statuses = [];
+  for (let i = 0; i < 5; i++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Real-IP': `10.0.0.${i + 1}` },
+      body: JSON.stringify({ email: 'target@example.com', password: 'guess' + i }),
+    });
+    statuses.push(res.status);
+  }
+  limited.close();
+  assert.deepEqual(statuses, [401, 401, 401, 429, 429]);
+});

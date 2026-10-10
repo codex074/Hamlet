@@ -28,16 +28,37 @@ class HttpError extends Error {
 }
 
 export function createApp({ db, rootDir, googleClientId = null, googleVerify = null, trustProxy = false, authLimit = AUTH_LIMIT }) {
-  const hits = new Map(); // ip -> [timestamps]
+  const hits = new Map(); // limiter key -> [timestamps]
+  const MAX_KEYS = 20000;
 
-  function rateLimit(ip) {
+  // Sliding-window limiter. Old entries are pruned instead of wiping the table, so flooding it with
+  // fresh keys cannot reset anyone else's counter.
+  function limit(key) {
     const now = Date.now();
-    const list = (hits.get(ip) || []).filter((t) => now - t < authLimit.windowMs);
+    const list = (hits.get(key) || []).filter((t) => now - t < authLimit.windowMs);
     list.push(now);
-    hits.set(ip, list);
-    if (hits.size > 10000) hits.clear();
+    hits.delete(key);          // re-insert so Map order stays "least recently used first"
+    hits.set(key, list);
+    if (hits.size > MAX_KEYS) {
+      for (const [k, ts] of hits) {
+        if (hits.size <= MAX_KEYS * 0.9) break;
+        if (now - ts[ts.length - 1] >= authLimit.windowMs) hits.delete(k);
+      }
+      // still full of live keys: drop the least recently used ones
+      for (const k of hits.keys()) { if (hits.size <= MAX_KEYS) break; hits.delete(k); }
+    }
     if (list.length > authLimit.max) throw new HttpError(429, 'ลองหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่');
   }
+
+  // IPv6 clients usually control a whole /64, so count them per /64.
+  function ipKey(ip) {
+    const v = String(ip).replace(/^::ffff:/, '');
+    if (!v.includes(':')) return `ip:${v}`;
+    return `ip6:${v.split(':').slice(0, 4).join(':')}`;
+  }
+  const rateLimit = (ip) => limit(ipKey(ip));
+  // Per-account limit stops slow brute force spread over many addresses.
+  const accountLimit = (email) => { if (email) limit(`email:${email}`); };
 
   const clientIp = (req) => (trustProxy && req.headers['x-real-ip']) || req.socket.remoteAddress || '?';
   const isSecure = (req) => (trustProxy ? req.headers['x-forwarded-proto'] === 'https' : !!req.socket.encrypted);
@@ -142,6 +163,7 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
       rateLimit(clientIp(req));
       const body = await readJson(req, MAX_SMALL_BODY);
       const email = normalizeEmail(body.email);
+      accountLimit(email);
       const password = typeof body.password === 'string' ? body.password.slice(0, 256) : '';
       const user = email ? db.userByEmail(email) : null;
       if (!user || !user.password_hash) {
