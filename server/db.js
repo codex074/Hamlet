@@ -51,7 +51,9 @@ function makeQueries(db) {
     userByGoogle: q('SELECT * FROM users WHERE google_sub = ?'),
     userByUsername: q('SELECT id FROM users WHERE username = ?'),
     insertUser: q('INSERT INTO users (email, password_hash, google_sub, created_at, last_login) VALUES (?, ?, ?, ?, ?)'),
-    linkGoogle: q('UPDATE users SET google_sub = ? WHERE id = ?'),
+    // Google proves ownership of the email; an unverified password set by whoever registered first is dropped.
+    linkGoogle: q('UPDATE users SET google_sub = ?, password_hash = NULL WHERE id = ?'),
+    deleteUserSessions: q('DELETE FROM sessions WHERE user_id = ?'),
     setUsername: q('UPDATE users SET username = ? WHERE id = ?'),
     touchLogin: q('UPDATE users SET last_login = ? WHERE id = ?'),
     insertSession: q('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
@@ -82,7 +84,10 @@ function makeQueries(db) {
       const r = s.insertUser.run(email, passwordHash, googleSub, now, now);
       return s.userById.get(Number(r.lastInsertRowid));
     },
-    linkGoogle: (id, sub) => s.linkGoogle.run(sub, id),
+    linkGoogle: (id, sub) => {
+      s.linkGoogle.run(sub, id);
+      s.deleteUserSessions.run(id);
+    },
     setUsername: (id, name) => s.setUsername.run(name, id),
     touchLogin: (id) => s.touchLogin.run(Date.now(), id),
     createSession: (tokenHash, userId, ttlMs) => {

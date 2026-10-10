@@ -161,6 +161,8 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
       try { info = await googleVerify(body.credential); } catch { throw new HttpError(401, 'ยืนยันตัวตนกับ Google ไม่สำเร็จ'); }
       let user = db.userByGoogle(info.sub);
       if (!user && info.email) {
+        // Emails are not verified at registration, so linking also revokes the account's password and sessions
+        // (see db.linkGoogle) — otherwise someone could pre-register a victim's email and keep access.
         const byEmail = db.userByEmail(info.email);
         if (byEmail && !byEmail.google_sub) { db.linkGoogle(byEmail.id, info.sub); user = db.userById(byEmail.id); }
       }

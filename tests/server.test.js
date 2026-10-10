@@ -164,7 +164,10 @@ test('google sign-in: valid token creates a user, links by email, rejects forged
   const reg = await pw('POST', '/api/register', { email: 'link@example.com', password: 'secret123' });
   const linked = await client()('POST', '/api/google', { credential: googleToken({ sub: 'g-2', email: 'link@example.com', email_verified: true }) });
   assert.equal(linked.json.user.id, reg.json.user.id);
-  assert.equal(linked.json.user.hasPassword, true);
+  // the pre-existing (unverified) password and its sessions are revoked
+  assert.equal(linked.json.user.hasPassword, false);
+  assert.equal((await pw('GET', '/api/me')).status, 401);
+  assert.equal((await pw('POST', '/api/login', { email: 'link@example.com', password: 'secret123' })).status, 401);
   // forgeries
   const { privateKey: evilKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const forged = await client()('POST', '/api/google', { credential: googleToken({ sub: 'g-3' }, { key: evilKey }) });
