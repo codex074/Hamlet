@@ -1,0 +1,13 @@
+name: hamlet
+services:
+  hamlet:
+    build: .
+    image: hamlet-server
+    container_name: hamlet-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"   # nginx on the host proxies hamlet.codex074.com here
+    volumes:
+      - /srv/hamlet/data:/data  # SQLite database + daily backups
+    env_file:
+      - /srv/hamlet/hamlet.env  # GOOGLE_CLIENT_ID=...
