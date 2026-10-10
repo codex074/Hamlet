@@ -29,9 +29,10 @@ function lifeOf(v) {
   return { age, gender, child: age < CHILD_AGE, elder: age >= ELDER_AGE, pregnant: !!v.pregnant };
 }
 
+// The uniform follows the job the player assigned (not what the villager happens to be doing).
 function roleOf(v, byId, life) {
   if (life.child) return 'child';
-  if (v.role === 'builder') return 'builder';
+  if (v.builder) return 'builder';
   if (v.jobId != null) {
     const b = byId.get(v.jobId);
     if (b && JOB_ROLE[b.type]) return JOB_ROLE[b.type];

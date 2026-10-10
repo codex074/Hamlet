@@ -4,7 +4,7 @@ import {
   CHILD_AGE, MARRY_MIN, MARRY_MAX, MARRY_CHANCE, FERTILE_MIN, FERTILE_MAX, PREGNANCY_CHANCE,
   PREGNANCY_DAYS, PREGNANCY_MIN_HAPPINESS, LEAVE_HOME_AGE, HOUSE_LEVELS, BUILDINGS, DEATH_AGE_MIN,
   DEATH_AGE_MAX, START, START_AGE, FAMILY_IMMIGRANT_CHANCE, IMMIGRANT_ADULT_AGE, IMMIGRANT_COUPLE_AGE,
-  IMMIGRANT_CHILD_AGE, IMMIGRANT_MAX_CHILDREN, PARENT_MIN_GAP,
+  IMMIGRANT_CHILD_AGE, IMMIGRANT_MAX_CHILDREN, PARENT_MIN_GAP, HUNGRY_AT, THIRSTY_AT,
 } from './config.js';
 import { mulberry32, randRange, randInt } from './rng.js';
 import { pickGivenName, pickSurname, fullName } from './names.js';
@@ -374,6 +374,8 @@ function statusOf(v) {
   const out = [];
   if (v.sick) out.push('sick');
   if (v.pregnant) out.push('pregnant');
+  if ((v.thirst ?? 0) >= THIRSTY_AT) out.push('thirsty');
+  if (v.hunger >= HUNGRY_AT) out.push('hungry');
   out.push(ROLE_STATUS[v.role] ?? 'idle');
   return out;
 }

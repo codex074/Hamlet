@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { world as createWorld } from './helpers.js';
 import {
-  tick, canPlace, placeBuilding, paintZone, canPaintZone, removeAt, setDesiredWorkers,
+  tick, canPlace, placeBuilding, paintZone, canPaintZone, removeAt, assignJob, jobChoices, jobCandidates, BUILDER,
   buildingAt, isUnlocked, summary, clock,
 } from '../src/sim.js';
 import { serialize, deserialize } from '../src/save.js';
@@ -11,7 +11,7 @@ import {
   DAY_LENGTH, START, SPAWN, NODE_AMOUNT, BUILDINGS, CATHEDRAL_STAGES, REFUND_RATIO,
 } from '../src/config.js';
 import {
-  world, townhall, addBuilt, addVillager, nearestNode, findPlaceSpot, findZoneSpot,
+  world, townhall, addBuilt, addVillager, nearestNode, findPlaceSpot, findZoneSpot, staffVillage,
 } from './helpers.js';
 
 test('createWorld basics', () => {
@@ -31,7 +31,9 @@ test('createWorld basics', () => {
   assert.equal(s.lastDay, 1);
   assert.ok(s.wear instanceof Float32Array);
   assert.ok(s.nodes.length > 0);
-  assert.equal(s.events.length, 1);
+  assert.equal(s.events.length, 2);   // welcome + how to assign jobs
+  assert.equal(s.manualJobs, true);
+  assert.ok(s.villagers.every((v) => v.jobId == null && v.builder === false));
   const ids = [...s.buildings, ...s.villagers].map((x) => x.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(ids.every((id) => id < s.nextId));
@@ -86,7 +88,6 @@ test('placeBuilding creates a site and removes overlapping trees into the storag
   assert.deepEqual(b.needed, BUILDINGS.woodcutter.cost);
   assert.notEqual(b.needed, BUILDINGS.woodcutter.cost);
   assert.deepEqual(b.incoming, {});
-  assert.equal(b.desiredWorkers, 2);
   assert.deepEqual(b.workers, []);
   assert.equal(b.rot, 1.2);
   assert.ok(s.nodes.length <= n0 - 2);
@@ -193,21 +194,53 @@ test('paintZone validates kind and brush size', () => {
   assert.equal(s.zones[0].kind, 'field');
 });
 
-test('setDesiredWorkers clamps and job assignment follows it', () => {
+test('jobs are only assigned by the player and respect the slot count', () => {
   const s = world();
   const wc = addBuilt(s, 'woodcutter', SPAWN.x + 30, SPAWN.z);
-  setDesiredWorkers(s, wc.id, 9);
-  assert.equal(wc.desiredWorkers, 2);
-  tick(s, 1.1);
-  assert.equal(wc.workers.length, 2);
-  setDesiredWorkers(s, wc.id, 1);
-  tick(s, 1.1);
-  assert.equal(wc.workers.length, 1);
-  assert.equal(s.villagers.filter((v) => v.jobId === wc.id).length, 1);
-  setDesiredWorkers(s, wc.id, -3);
-  assert.equal(wc.desiredWorkers, 0);
-  tick(s, 1.1);
+  tick(s, 5);
+  assert.equal(wc.workers.length, 0);
   assert.equal(summary(s).unemployed, 8);
+  const [a, b, c] = s.villagers;
+  assert.equal(assignJob(s, a.id, wc.id).ok, true);
+  assert.equal(assignJob(s, b.id, wc.id).ok, true);
+  const full = assignJob(s, c.id, wc.id);
+  assert.equal(full.ok, false);
+  assert.match(full.reason, /เต็ม/);
+  tick(s, 1.1);
+  assert.deepEqual(wc.workers, [a.id, b.id]);
+  assert.equal(summary(s).unemployed, 6);
+  // moving a worker frees their slot; unassigning makes them free again
+  assert.equal(assignJob(s, a.id, BUILDER).ok, true);
+  assert.equal(a.jobId, null);
+  assert.equal(a.builder, true);
+  assert.deepEqual(wc.workers, [b.id]);
+  assert.equal(assignJob(s, c.id, wc.id).ok, true);
+  assert.equal(assignJob(s, b.id, null).ok, true);
+  tick(s, 1.1);
+  assert.deepEqual(wc.workers, [c.id]);
+  assert.equal(summary(s).workforce.builders, 1);
+  assert.equal(summary(s).workforce.openSlots, 1);
+  // a demolished workplace frees its workers
+  removeAt(s, wc.x, wc.z);
+  assert.equal(c.jobId, null);
+});
+
+test('jobChoices and jobCandidates describe what the picker can offer', () => {
+  const s = world();
+  const wc = addBuilt(s, 'woodcutter', SPAWN.x + 30, SPAWN.z);
+  addBuilt(s, 'woodcutter', SPAWN.x - 30, SPAWN.z);
+  const [a, b, c] = s.villagers;
+  assignJob(s, a.id, wc.id);
+  assignJob(s, b.id, wc.id);
+  const choices = jobChoices(s, c.id);
+  assert.deepEqual(choices.slice(0, 2).map((x) => x.key), [null, BUILDER]);
+  const first = choices.find((x) => x.key === wc.id);
+  assert.equal(first.ok, false);
+  assert.equal(first.name, `${BUILDINGS.woodcutter.name} 1`);
+  assert.equal(choices.find((x) => x.name === `${BUILDINGS.woodcutter.name} 2`).ok, true);
+  const cands = jobCandidates(s, wc.id);
+  assert.ok(!cands.some((x) => x.id === a.id || x.id === b.id));
+  assert.equal(cands[0].current, null, 'free villagers are listed first');
 });
 
 test('buildingAt finds the building whose footprint contains the point', () => {
@@ -221,7 +254,7 @@ test('summary fields', () => {
   const sum = summary(s);
   assert.deepEqual(Object.keys(sum).sort(),
     ['adults', 'births', 'children', 'day', 'deaths', 'difficulty', 'elders', 'food', 'gold', 'happiness', 'homeless', 'hour',
-      'housing', 'isNight', 'ownedPlots', 'pop', 'pregnant', 'sick', 'stock', 'totalPlots', 'unemployed']);
+      'housing', 'isNight', 'ownedPlots', 'pop', 'pregnant', 'sick', 'stock', 'totalPlots', 'unemployed', 'workforce']);
   assert.deepEqual([sum.adults, sum.children, sum.elders, sum.pregnant, sum.births, sum.deaths], [8, 0, 0, 0, 0, 0]);
   assert.equal(sum.pop, 8);
   assert.equal(sum.homeless, 8);
@@ -288,6 +321,7 @@ test('INTEGRATION: three game days of a small village', () => {
   let worstEmpty = 0;
   const steps = Math.round((DAY_LENGTH * 3) / 0.1);
   for (let i = 0; i < steps; i++) {
+    if (i % 10 === 0) staffVillage(s);
     tick(s, 0.1);
     for (const v of s.villagers) {
       emptyRuns.set(v.id, v.queue.length === 0 ? (emptyRuns.get(v.id) ?? 0) + 1 : 0);
@@ -346,6 +380,7 @@ test('INTEGRATION: thirty game days (seed 5) with fishery, hunter, sheepfarm, he
   const steps = Math.round((DAY_LENGTH * 30) / 0.1);
   assert.doesNotThrow(() => {
     for (let i = 0; i < steps; i++) {
+      if (i % 10 === 0) staffVillage(s);
       tick(s, 0.1);
       if (i % 100 === 0) for (const e of s.events) if (/^(💍|👶)/u.test(e.text)) seen.add(`${e.t}|${e.text}`);
     }

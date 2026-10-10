@@ -4,7 +4,7 @@ import { world as createWorld } from './helpers.js';
 import { serialize, deserialize, saveGame, loadGame, clearSave } from '../src/save.js';
 import { tick } from '../src/sim.js';
 import { GRID, DEER_COUNT } from '../src/config.js';
-import { addHouse } from './helpers.js';
+import { addHouse, addBuilt, SPAWN } from './helpers.js';
 
 function withStorage(fn) {
   const store = new Map();
@@ -138,4 +138,24 @@ test('v1 saves migrate (to v4): deer, fx, sickness, house and supply fields, ore
   assert.equal(JSON.parse(serialize(m)).version, 4);
   assert.doesNotThrow(() => tick(m, 20));
   assert.doesNotThrow(() => deserialize(serialize(m)));
+});
+
+test('saves from before manual jobs turn the jobless adults into builders; workers keep their posts', () => {
+  const s = createWorld(1);
+  const wc = addBuilt(s, 'woodcutter', SPAWN.x + 30, SPAWN.z);
+  const [w, free, kid] = s.villagers;
+  w.jobId = wc.id;
+  kid.age = 8;
+  delete s.manualJobs;
+  for (const v of s.villagers) delete v.builder;
+  const back = deserialize(serialize(s));
+  assert.equal(back.manualJobs, true);
+  const by = (id) => back.villagers.find((v) => v.id === id);
+  assert.equal(by(w.id).jobId, wc.id);
+  assert.equal(by(w.id).builder, false);
+  assert.equal(by(free.id).builder, true);
+  assert.equal(by(kid.id).builder, false);
+  // a save made after the change is left alone
+  const again = deserialize(serialize(back));
+  assert.equal(again.villagers.filter((v) => v.builder).length, back.villagers.filter((v) => v.builder).length);
 });

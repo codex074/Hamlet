@@ -3,9 +3,10 @@
 import {
   BUILDINGS, RESOURCES, RESOURCE_INFO, HOUSE_LEVELS, NEED_INFO, CATHEDRAL_STAGES,
   ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS, FISH_RADIUS, HUNT_RADIUS, FOODS, SUPPLY_MAX, TOOL_SPEED_BONUS,
-  SICK_LEAVE_DAYS, DAY_LENGTH,
+  SICK_LEAVE_DAYS, DAY_LENGTH, WATER_RADIUS, THIRSTY_AT, HUNGRY_AT, MARKET_SLOTS, MARKET_TREASURY_SHARE,
 } from '../config.js';
 import * as sim from '../sim.js';
+import { createWorkforceUI } from './workforce.js';
 
 const { clock, isUnlocked } = sim;
 
@@ -15,7 +16,7 @@ const BUILDING_ICON = {
   storehouse: '📦', woodcutter: '🪓', forager: '🧺', quarry: '⛏️', sawmill: '🪚',
   farmhouse: '🌾', mill: '🌬️', bakery: '🥖', chapel: '⛪', tavern: '🍺', cathedral: '🏰',
   fishery: '🎣', hunter: '🏹', herbalist: '🌿', sheepfarm: '🐑', ironmine: '⚒️',
-  weaver: '🧵', blacksmith: '🛠️', infirmary: '🏥', market: '🏪',
+  weaver: '🧵', blacksmith: '🛠️', infirmary: '🏥', market: '🏪', forester: '🌱', well: '🪣',
 };
 
 const BUILDING_DESC = {
@@ -37,7 +38,8 @@ const BUILDING_DESC = {
   weaver: 'ทอขนแกะเป็นผ้า ผ้าไปเติมที่ตลาดเพื่อให้บ้านระดับสูงมีเสื้อผ้า',
   blacksmith: 'ตีแร่เหล็กเป็นเครื่องมือ อาคารผลิตที่มีเครื่องมือจะทำงานเร็วขึ้น และใช้อัปเกรดบ้านระดับสูงสุด',
   infirmary: 'หมอรักษาคนป่วยในรัศมี ต้องมีสมุนไพรในคลังของสถานพยาบาล และให้บริการด้านสุขภาพแก่บ้านรอบๆ',
-  market: 'พ่อค้าขายผ้าให้บ้านในรัศมี ต้องมีผ้าในคลังของตลาด บ้านระดับ 4 ขึ้นไปต้องการเสื้อผ้า',
+  market: `พ่อค้าขนสินค้าจากโกดังมาวางขาย (เลือกได้ ${MARKET_SLOTS} รายการ) ชาวบ้านใช้เงินค่าจ้างซื้ออาหารกินที่นี่แทนการเดินไปโกดังไกลๆ ผ้าที่วางขายใช้เป็นเสื้อผ้าของบ้านระดับ 4+ และมีบ่อน้ำในตัว`,
+  well: `น้ำดื่มไม่จำกัด ไม่ต้องใช้คนงาน ชาวบ้านที่กระหายน้ำจะเดินมาดื่มที่แหล่งน้ำที่ใกล้ที่สุด บ้านในรัศมี ${WATER_RADIUS} ม. ได้รับความต้องการ "น้ำดื่ม"`,
   cathedral: 'สิ่งก่อสร้างยิ่งใหญ่ สร้างทีละ 4 ขั้น ต้องใช้ทองด้วย สร้างได้เพียงหลังเดียว',
 };
 
@@ -98,6 +100,7 @@ function resChips(obj) {
 function jobLine(type) {
   const d = BUILDINGS[type];
   if (d.storage) return 'เก็บทรัพยากร · ไม่ต้องใช้คนงาน';
+  if (d.waterRadius) return `น้ำดื่ม · ไม่ต้องใช้คนงาน · บ้านในรัศมี ${d.waterRadius} ม.`;
   const parts = [];
   if (d.workers) parts.push(`คนงาน ${d.workers}`);
   if (d.job === 'gather') parts.push(`${NODE_NAME[d.node] || d.node}${d.keepNode ? ' (ไม่ทำให้หมด)' : ''} → ${resNames(d.output)}`);
@@ -107,7 +110,8 @@ function jobLine(type) {
   else if (d.job === 'fish') parts.push(`ตกปลา (ติดน้ำ, รัศมี ${FISH_RADIUS} ม.) → ${resNames(d.output)}`);
   else if (d.job === 'hunt') parts.push(`ล่ากวาง (รัศมี ${HUNT_RADIUS} ม.) → ${resNames(d.output)}`);
   else if (d.job === 'ranch') parts.push(`เลี้ยงแกะ → ${(d.outputs || []).map(resNames).join(' / ')}`);
-  else if (d.job === 'doctor' || d.job === 'market') {
+  else if (d.job === 'market') parts.push(`ขายอาหาร/ผ้าได้ 4 รายการ · ชาวบ้านซื้อด้วยเงินค่าจ้าง · มีบ่อน้ำ`);
+  else if (d.job === 'doctor') {
     parts.push(`บริการ${SERVICE_NAME[d.service] || ''} รัศมี ${d.serviceRadius} ม. · ใช้${info(d.supply).name}`);
   }
   return parts.join(' · ');
@@ -230,6 +234,12 @@ export function createHUD(root, handlers = {}) {
   document.addEventListener('pointerdown', (e) => {
     if (popTapTimer && !popChip.chip.contains(e.target)) { clearTimeout(popTapTimer); popTapTimer = 0; hideTip(); }
   }, true);
+  // workforce: free villagers (click → job assignment panel)
+  const jobsChip = addChip('jobs', '👷', 'จัดการงาน — คลิกเพื่อมอบหมายงานให้ชาวบ้าน (J)', 'jobs');
+  const jobsSub = el('span', 'sub', ' ว่างงาน');
+  jobsChip.chip.appendChild(jobsSub);
+  jobsChip.chip.style.cursor = 'pointer';
+  jobsChip.chip.addEventListener('click', () => openWorkforce());
   addChip('happy', '😊', 'ความสุขเฉลี่ย');
   const terrChip = addChip('terr', '🗺️', 'ดินแดนที่เป็นของคุณ / ทั้งหมด (คลิกเพื่อเปิดมุมมองดินแดน)', 'terr');
   terrChip.chip.hidden = true;
@@ -478,6 +488,7 @@ export function createHUD(root, handlers = {}) {
     call('setAutoUpgrade', null, on);
     toast(`อัปเกรดอัตโนมัติทุกหลัง: ${on ? 'เปิด' : 'ปิด'}`);
   });
+  addMenuItem('👥 จัดการงาน', () => openWorkforce());
   addMenuItem('⚙️ ตั้งค่า', () => call('showSettings'));
   addMenuItem('💾 บันทึกเกม', () => { call('saveGame'); toast('บันทึกเกมแล้ว'); });
   const cloud = !!(handlers && handlers.cloud);
@@ -537,6 +548,13 @@ export function createHUD(root, handlers = {}) {
   let infoWkEl = null;
   let infoBodyHtml = '';
   let infoVid = null;   // villager id when the panel shows a villager instead of a building
+  let infoWkHtml = '';
+  const wf = createWorkforceUI({
+    root, call, getState: () => lastState, toast: (t) => toast(t), icon: (t) => BUILDING_ICON[t] || '🏠',
+  });
+  function openWorkforce() {
+    if (lastState) wf.openWorkforce();
+  }
 
   // body.info-open lets the CSS move the event log / FPS counter out of the way of the bottom sheet
   function setInfoOpen(open) { document.body.classList.toggle('info-open', !!open); }
@@ -585,6 +603,7 @@ export function createHUD(root, handlers = {}) {
     infoEl.textContent = '';
     infoBodyEl = infoWkEl = null;
     infoBodyHtml = '';
+    infoWkHtml = '';
   }
 
   function findBuilding(state, id) {
@@ -609,18 +628,11 @@ export function createHUD(root, handlers = {}) {
     head.appendChild(x);
     infoEl.appendChild(head);
     infoWkEl = null;
+    infoWkHtml = '';
     if (def.workers > 0 && b.built) {
-      const row = el('div', 'wrow');
-      row.appendChild(el('span', null, 'คนงาน'));
-      const minus = el('button', null, '−');
-      const wk = el('span', 'wk', '');
-      const plus = el('button', null, '+');
-      minus.type = plus.type = 'button';
-      minus.addEventListener('click', () => adjustWorkers(-1));
-      plus.addEventListener('click', () => adjustWorkers(1));
-      row.append(minus, wk, plus);
-      infoEl.appendChild(row);
-      infoWkEl = wk;
+      infoWkEl = el('div', 'wbox');
+      infoWkEl.addEventListener('click', (e) => { wf.onWorkersClick(e, b.id); renderInfo(lastState); });
+      infoEl.appendChild(infoWkEl);
     }
     infoBodyEl = el('div', 'info-body');
     infoBodyEl.addEventListener('click', onInfoClick);
@@ -629,17 +641,6 @@ export function createHUD(root, handlers = {}) {
     infoEl.hidden = false;
     infoEl.scrollTop = 0;
     setInfoOpen(true);
-  }
-
-  function adjustWorkers(delta) {
-    const b = findBuilding(lastState, infoId);
-    if (!b) return;
-    const max = BUILDINGS[b.type].workers;
-    const cur = b.desiredWorkers != null ? b.desiredWorkers : max;
-    const next = Math.max(0, Math.min(max, cur + delta));
-    if (next === cur) return;
-    call('setWorkers', b.id, next);
-    renderInfo(lastState);
   }
 
   function siteHtml(b, state) {
@@ -662,6 +663,13 @@ export function createHUD(root, handlers = {}) {
       h += `<div class="sub">วัสดุที่ขาด</div><div class="rcs">${resChips(Object.fromEntries(miss))}</div>`;
     } else if (!(b.goldBlocked > 0)) {
       h += '<div class="sub ok">วัสดุครบ รอช่างก่อสร้าง</div>';
+    }
+    const crew = ((state && state.villagers) || []).filter((v) => v.builder && !v.sick && !v.pregnant).length;
+    if (crew === 0) {
+      h += '<div class="warn small">🏗️ ยังไม่มีช่างก่อสร้าง — ไม่มีใครมาสร้าง</div>'
+        + '<button type="button" class="btn small wf-open" data-act="workforce">👥 มอบหมายช่างก่อสร้าง</button>';
+    } else {
+      h += `<div class="dim small">🏗️ ช่างก่อสร้างในหมู่บ้าน ${crew} คน</div>`;
     }
     return h;
   }
@@ -710,6 +718,7 @@ export function createHUD(root, handlers = {}) {
   const STATUS_INFO = {
     sick: ['🤒', 'ป่วย'], pregnant: ['🤰', 'ตั้งครรภ์'], sleeping: ['💤', 'หลับ'],
     working: ['🔨', 'ทำงาน'], idle: ['🚶', 'ว่าง'], builder: ['🏗️', 'ช่างก่อสร้าง'],
+    hungry: ['🍽️', 'หิว'], thirsty: ['💧', 'กระหายน้ำ'],
   };
   const genderIcon = (g) => (g === 'f' ? '<span class="gf">♀</span>' : g === 'm' ? '<span class="gm">♂</span>' : '');
   const ageText = (a) => `${Math.floor(Number(a) || 0)} ปี`;
@@ -776,12 +785,32 @@ export function createHUD(root, handlers = {}) {
     const chips = (vi.status || []).filter((k) => STATUS_INFO[k])
       .map((k) => `<span class="chp ${k}">${STATUS_INFO[k][0]} ${STATUS_INFO[k][1]}</span>`).join('');
     if (chips) h += `<div class="chps">${chips}</div>`;
+    const pv = ((state && state.villagers) || []).find((p) => p.id === vi.id);
+    if (pv) {
+      const meter = (label, val, warnAt) => {
+        const pct = Math.round(Math.min(1, val || 0) * 100);
+        return `<div class="meter${val >= warnAt ? ' hot' : ''}"><span>${label}</span><div class="bar"><i style="width:${pct}%"></i></div><span>${pct}%</span></div>`;
+      };
+      h += meter('🍽️ หิว', pv.hunger, HUNGRY_AT) + meter('💧 กระหาย', pv.thirst, THIRSTY_AT);
+      h += `<div class="small">💰 เงิน ${Math.floor(pv.coins || 0)} <span class="dim">— ได้จากการทำงาน ใช้ซื้ออาหารที่ตลาด</span></div>`;
+    }
 
     const rows = [];
     const buildingName = (t) => (BUILDINGS[t] && BUILDINGS[t].name) || t;
-    rows.push(['งาน', vi.job
-      ? bLink(vi.job.id, vi.job.name || buildingName(vi.job.type))
-      : `<span class="dim">${stage === 'child' ? 'ยังเด็ก' : 'ไม่มีงานประจำ'}</span>`]);
+    const v = ((state && state.villagers) || []).find((p) => p.id === vi.id);
+    const title = v && typeof sim.jobTitleOf === 'function' ? sim.jobTitleOf(state, v) : null;
+    let job;
+    if (stage === 'child') job = '<span class="dim">ยังเด็ก</span>';
+    else if (vi.job) {
+      const where = vi.job.name || buildingName(vi.job.type);
+      job = title && title !== where ? `${esc(title)} · ${bLink(vi.job.id, where)}` : bLink(vi.job.id, where);
+    }
+    else if (v && v.builder) job = `🏗️ ${esc(title)}`;
+    else job = '<span class="warn">ว่างงาน</span>';
+    if (stage !== 'child') job += ' <button type="button" class="btn small" data-act="job">เปลี่ยนงาน</button>';
+    rows.push(['งาน', job]);
+    const wait = v && typeof sim.waitingReason === 'function' ? sim.waitingReason(state, v) : null;
+    if (wait) rows.push(['', `<span class="dim small">⏳ ${esc(wait)}</span>`]);
     rows.push(['บ้าน', vi.home
       ? bLink(vi.home.id, `บ้านระดับ ${vi.home.level || 1}`)
       : '<span class="dim">ไร้บ้าน</span>']);
@@ -911,6 +940,35 @@ export function createHUD(root, handlers = {}) {
     return h;
   }
 
+  // Market: pick up to MARKET_SLOTS goods (toggle chips), stall stock, prices and sales.
+  function marketHtml(b, def, state) {
+    const sell = Array.isArray(b.sell) ? b.sell : (sim.DEFAULT_MARKET_GOODS || []);
+    const goods = sim.MARKET_GOODS || [];
+    let h = `<div class="sub">สินค้าที่วางขาย (เลือกได้ ${MARKET_SLOTS} รายการ · ${sell.length}/${MARKET_SLOTS})</div><div class="mkt">`;
+    for (const r of goods) {
+      const on = sell.includes(r);
+      const full = !on && sell.length >= MARKET_SLOTS;
+      const have = Math.floor((b.stock && b.stock[r]) || 0);
+      const max = typeof sim.stockMaxOf === 'function' ? sim.stockMaxOf(r) : SUPPLY_MAX;
+      const price = typeof sim.priceOf === 'function' ? sim.priceOf(r) : null;
+      const tip = on ? 'กดเพื่อเลิกขาย (ของที่เหลือยังขายจนหมด)' : full ? `เลือกครบ ${MARKET_SLOTS} รายการแล้ว — เลิกขายอย่างอื่นก่อน` : 'กดเพื่อวางขาย';
+      h += `<button type="button" class="mk${on ? ' on' : ''}" data-act="sell" data-res="${r}" ${full ? 'disabled' : ''} title="${esc(tip)}">`
+        + `<span class="mk-ic">${info(r).icon}</span><span class="mk-nm">${info(r).name}</span>`
+        + `<span class="mk-st">${on || have > 0 ? `${have}/${max}` : ''}</span>`
+        + `<span class="mk-pr">${price != null ? `💰${price}` : 'บ้าน'}</span></button>`;
+    }
+    h += '</div>';
+    h += `<div class="dim small">ขายไปแล้ว ${b.sold || 0} ชิ้น · รายรับ 💰${b.revenue || 0} (เข้าคลังหมู่บ้าน ${Math.round(MARKET_TREASURY_SHARE * 100)}% เป็น 🪙)</div>`;
+    if (!(b.workers || []).length) h += '<div class="warn small">ไม่มีพ่อค้า — ตลาดปิด ชาวบ้านซื้อของไม่ได้</div>';
+    if (!sell.includes('cloth')) h += '<div class="dim small">ไม่ได้ขายผ้า — บ้านในรัศมีจะไม่ได้รับเสื้อผ้าจากตลาดนี้</div>';
+    else {
+      const covered = ((state && state.buildings) || []).filter((o) => o.type === 'house' && o.built
+        && Math.hypot(o.x - b.x, o.z - b.z) <= def.serviceRadius).length;
+      h += `<div class="dim small">ผ้าใช้เป็นเสื้อผ้าของบ้าน ${covered} หลังในรัศมี ${def.serviceRadius} ม.</div>`;
+    }
+    return h;
+  }
+
   function infoBody(b, state) {
     const def = BUILDINGS[b.type];
     let h = '';
@@ -926,20 +984,28 @@ export function createHUD(root, handlers = {}) {
       return h;
     }
     if (b.type === 'house') return houseHtml(b, state);
+    if (def.waterRadius) {
+      const near = ((state && state.buildings) || []).filter((o) => o.type === 'house' && o.built
+        && Math.hypot(o.x - b.x, o.z - b.z) <= def.waterRadius).length;
+      return '<div class="stat ok">💧 มีน้ำให้ดื่มตลอด</div>'
+        + `<div>บ้านในรัศมี ${def.waterRadius} ม.: ${near} หลัง</div>`
+        + '<div class="dim small">ชาวบ้านที่กระหายน้ำจะเดินไปดื่มที่บ่อน้ำ ศาลากลาง ตลาด หรือริมน้ำที่ใกล้ที่สุด — วางบ่อน้ำใกล้บ้านและที่ทำงานเพื่อลดการเดิน</div>';
+    }
     const working = !(def.workers > 0 && (b.workers || []).length === 0);
     if (b.problem) {
       h += `<div class="problem ${b.problem.blocking ? 'bad' : ''}"><b>⚠️ ${esc(b.problem.text)}</b>`
         + (b.paused
-          ? '<div class="small">หยุดชั่วคราว — คนงานถูกย้ายไปทำงานอื่น อาคารจะกลับมาทำงานเองเมื่อแก้ปัญหานี้แล้ว</div>'
-          : b.problem.blocking ? '<div class="small">ถ้ายังไม่แก้ภายใน 2 ชั่วโมงในเกม อาคารจะหยุดชั่วคราวและปล่อยคนงานไปทำงานอื่น</div>' : '')
+          ? '<div class="small">หยุดชั่วคราว — คนงานยังประจำอยู่แต่รอจนกว่าจะแก้ปัญหานี้ได้ (ย้ายคนงานไปงานอื่นได้ด้านบน)</div>'
+          : b.problem.blocking ? '<div class="small">ถ้ายังไม่แก้ภายใน 2 ชั่วโมงในเกม อาคารจะหยุดชั่วคราว คนงานจะรออยู่จนกว่าจะแก้ได้</div>' : '')
         + '</div>';
     } else {
       h += working ? '<div class="stat ok">ทำงานปกติ</div>' : '<div class="stat warn">ยังไม่มีคนงาน</div>';
     }
     if (b.tooled) h += `<div class="ok small">🔧 มีเครื่องมือ (+${Math.round(TOOL_SPEED_BONUS * 100)}%)</div>`;
     const sickWorkers = ((state && state.villagers) || []).filter((v) => v.sick && v.jobId === b.id).length;
-    if (sickWorkers > 0) h += `<div class="warn small">🤒 คนงานป่วย ${sickWorkers} คน (ออกจากงานชั่วคราว)</div>`;
-    if (def.supply) h += supplyHtml(b, def, state);
+    if (sickWorkers > 0) h += `<div class="warn small">🤒 คนงานป่วย ${sickWorkers} คน (หยุดงานจนกว่าจะหาย)</div>`;
+    if (def.job === 'market') h += marketHtml(b, def, state);
+    else if (def.supply) h += supplyHtml(b, def, state);
     else if (def.storage || b.stock) h += stockHtml(b);
     return h;
   }
@@ -953,9 +1019,17 @@ export function createHUD(root, handlers = {}) {
     }
     const btn = e.target.closest && e.target.closest('[data-act]');
     if (!btn || btn.disabled) return;
+    if (btn.dataset.act === 'job') { if (infoVid != null) wf.openJobPicker(infoVid); return; }
+    if (btn.dataset.act === 'workforce') { openWorkforce(); return; }
     const b = findBuilding(lastState, infoId);
     if (!b) return;
-    if (btn.dataset.act === 'upgrade') {
+    if (btn.dataset.act === 'sell') {
+      const cur = Array.isArray(b.sell) ? b.sell.slice() : (sim.DEFAULT_MARKET_GOODS || []).slice();
+      const r = btn.dataset.res;
+      const next = cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r];
+      const res = call('setMarketGoods', b.id, next);
+      if (res && !res.ok) toast(res.reason);
+    } else if (btn.dataset.act === 'upgrade') {
       const r = call('requestUpgrade', b.id);
       if (r && r.ok) toast(`เริ่มอัปเกรดบ้านเป็น${(() => { const st = safeUpgradeStatus(lastState, b); const n = st && st.nextLevel; return n && typeof n === 'object' ? n.name : levelOf((b.level || 1) + 1).name; })()}`);
       else toast((r && r.reason) || 'อัปเกรดไม่ได้');
@@ -973,9 +1047,8 @@ export function createHUD(root, handlers = {}) {
     const sig = `${b.id}|${b.type}|${b.built}`;
     if (sig !== infoSig) { infoSig = sig; buildInfoShell(b); }
     if (infoWkEl) {
-      const max = BUILDINGS[b.type].workers;
-      const want = b.desiredWorkers != null ? b.desiredWorkers : max;
-      setText(infoWkEl, `${(b.workers || []).length}/${want}`);
+      const wk = wf.workersHtml(b, state);
+      if (wk !== infoWkHtml) { infoWkHtml = wk; infoWkEl.innerHTML = wk; }
     }
     const html = infoBody(b, state);
     if (html !== infoBodyHtml) { infoBodyHtml = html; infoBodyEl.innerHTML = html; }
@@ -1165,6 +1238,15 @@ export function createHUD(root, handlers = {}) {
     }
     setText(nums.gold.num, String(Math.floor(summary.gold || 0)));
     setText(nums.pop.num, String(summary.pop || 0));
+    const ws = summary.workforce;
+    if (ws) {
+      setText(nums.jobs.num, String(ws.free));
+      // highlight when someone could be put to work, or construction has nobody to build it
+      const attention = (ws.free > 0 && (ws.openSlots > 0 || ws.sites > 0)) || (ws.sites > 0 && ws.builders === 0);
+      nums.jobs.chip.classList.toggle('attn', attention);
+      nums.jobs.chip.title = `ว่างงาน ${ws.free} · ช่างก่อสร้าง ${ws.builders} · ตำแหน่งว่าง ${ws.openSlots}${ws.sites ? ` · งานก่อสร้าง ${ws.sites}` : ''} — คลิกเพื่อจัดการงาน (J)`;
+    }
+    wf.refresh();
     setText(popSub, ` (ไร้บ้าน ${summary.homeless || 0})`);
     const sick = summary.sick != null ? summary.sick : ((state && state.villagers) || []).filter((v) => v.sick).length;
     sickEl.hidden = !(sick > 0);
@@ -1191,5 +1273,5 @@ export function createHUD(root, handlers = {}) {
     renderInfo(state);
   }
 
-  return { update, showInfo, showVillager, toast, setActiveTool, setSpeedDisplay, setSaveStatus, showPlotCard, hidePlotCard };
+  return { update, showInfo, showVillager, openWorkforce, toast, setActiveTool, setSpeedDisplay, setSaveStatus, showPlotCard, hidePlotCard };
 }

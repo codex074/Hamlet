@@ -3,7 +3,7 @@ import { createWorld, tick, placeBuilding, paintZone } from '../src/sim.js';
 import { createVillager } from '../src/villagers.js';
 import { DAY_LENGTH, BUILDINGS } from '../src/config.js';
 import { spawnOf } from '../src/world.js';
-import { addBuilt, findPlaceSpot, findZoneSpot } from '../tests/helpers.js';
+import { addBuilt, findPlaceSpot, findZoneSpot, staffVillage } from '../tests/helpers.js';
 
 export function buildBenchWorld(seed = 7, villagers = 60) {
   const t0 = performance.now();
@@ -29,6 +29,7 @@ export function buildBenchWorld(seed = 7, villagers = 60) {
   if (z) paintZone(s, 'residential', z.x, z.z, 12);
   const f = findZoneSpot(s, 'field', 12, c.x - 25, c.z - 20, 60);
   if (f) paintZone(s, 'field', f.x, f.z, 12);
+  staffVillage(s, 6);
   return { s, genMs };
 }
 

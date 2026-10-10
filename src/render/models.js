@@ -6,7 +6,7 @@
 //   MAT, WINDOW_MATERIALS, NODE_MODELS, VILLAGER_MODEL, CARRY_MODEL           (unchanged shapes)
 //   makeBuildingModel(type, { level = 1 (houses 1..5), stage = 0, seed = 0 } = {}) -> THREE.Group
 //     types: townhall storehouse woodcutter forager quarry sawmill farmhouse mill bakery chapel tavern cathedral house
-//            fishery hunter herbalist forester sheepfarm ironmine weaver blacksmith infirmary market
+//            fishery hunter herbalist forester sheepfarm ironmine weaver blacksmith infirmary market well
 // sheepfarm: group.userData.pen = { x, z, r } (local pen centre / radius, open grass inside, for the sheep).
 // blacksmith hearth uses the 'hot' glass material (member of WINDOW_MATERIALS: glows with emissiveIntensity).
 //   makeSiteModel(radius = 4, seed = 0) -> THREE.Group
@@ -2928,6 +2928,30 @@ function stall(k, x, z, ry, o) {
   k.pop();
 }
 
+// ---------------------------------------------------------------- well (standalone)
+
+function bucket(k, x, z, ry = 0, full = true) {
+  k.push(x, 0, z, ry);
+  k.cyl('planks', 0.17, 0.14, 0.28, 0, 0, 0, 8, { c: 0x9a7048, caps: 'none' });
+  for (const hy of [0.04, 0.22]) k.cyl('flat', 0.175, 0.175, 0.03, 0, hy, 0, 8, { c: 0x55585c, caps: 'none', ao: false });
+  if (full) k.disc('flat', 0.15, 0, 0.25, 0, 8, { c: 0x3d6f8c, ao: false });
+  k.pop();
+}
+
+function wellBuilding(k, st) {
+  k.cyl('cobble', 1.75, 1.7, 0.06, 0, 0, 0, 12, { c: 0xd2c8b2, caps: 'top', j: 0.03 });
+  well(k, 0, 0);
+  // stone trough on the door side for washing and the animals
+  k.push(0.95, 0, 0.95, -0.6);
+  k.box('stone', 1.0, 0.32, 0.42, 0, 0, 0, { c: st.stone });
+  k.box('flat', 0.84, 0.02, 0.28, 0, 0.3, 0, { c: 0x3d6f8c, nb: true, ao: false });
+  k.pop();
+  bucket(k, -0.95, 0.75, 0.3);
+  bucket(k, -1.2, 0.35, 1.1, false);
+  k.cyl('timber', 0.06, 0.06, 0.9, 0.3, 0, -1.25, 5, { c: 0x5b3b25, caps: 'top' });   // post with a ladle
+  k.cyl('flat', 0.08, 0.06, 0.08, 0.3, 0.86, -1.18, 6, { c: 0x8a6a48, ao: false });
+}
+
 function market(k, st) {
   // cobbled square
   k.cyl('cobble', 5.3, 5.2, 0.07, 0, 0, 0, 14, { c: 0xd8cfba, caps: 'top', j: 0.03 });
@@ -3421,6 +3445,7 @@ function styleFor(seed) {
 const BUILDERS = {
   townhall, storehouse, woodcutter, forager, quarry, sawmill, farmhouse, mill, bakery, chapel, tavern,
   fishery, hunter, herbalist, forester, sheepfarm, ironmine, weaver, blacksmith, infirmary, market,
+  well: wellBuilding,
 };
 
 export function makeBuildingModel(type, { level = 1, stage = 0, seed = 0 } = {}) {

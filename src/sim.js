@@ -2,7 +2,7 @@
 import {
   DAY_LENGTH, START, BUILDINGS, CATHEDRAL_STAGES, HOUSE_LEVELS, DIFFICULTY, START_LAYOUT,
   START_STOCK_MUL, START_GOLD_BONUS, BERRY_REGROW_PER_SEC, REFUND_RATIO, ZONE_BRUSH, RESOURCES,
-  BUILDER_RESERVE, DEER_RESPAWN_SEC,
+  DEER_RESPAWN_SEC,
 } from './config.js';
 import { mulberry32 } from './rng.js';
 import { generateTerrain, generateNodes } from './terrain.js';
@@ -28,12 +28,21 @@ import { upgradeStatus, requestUpgrade, setAutoUpgrade } from './upgrades.js';
 import {
   createStartingVillagers, processDeaths, villagerAt, villagerInfo, household, populationCounts,
 } from './families.js';
-import { canBuild, canWork, canTakeJob } from './taskutil.js';
-import { updateBuildingStatus, effectiveWorkers, foodSummary } from './status.js';
+import { updateBuildingStatus, foodSummary } from './status.js';
+import {
+  ensureMarket, setMarketGoods, MARKET_GOODS, DEFAULT_MARKET_GOODS, priceOf, stockMaxOf,
+} from './market.js';
+import {
+  syncJobs, assignJob, jobChoices, jobCandidates, workforceSummary, workplaceName, waitingReason, jobTitleOf,
+  BUILDER, JOB_TITLE, BUILDER_TITLE,
+} from './workforce.js';
 
 export {
   clock, serviceCovered, upgradeStatus, requestUpgrade, setAutoUpgrade, villagerAt, villagerInfo, household,
   normalizeSettings, DEFAULT_SETTINGS, SETTINGS_OPTIONS, spawnOf, plotInfo, plotPrice, buyPlot, isOwned,
+  assignJob, jobChoices, jobCandidates, workforceSummary, workplaceName, waitingReason, jobTitleOf,
+  BUILDER, JOB_TITLE, BUILDER_TITLE, ensureMarket, setMarketGoods, MARKET_GOODS, DEFAULT_MARKET_GOODS, priceOf,
+  stockMaxOf,
 };
 
 const MAX_STEP = 0.1;
@@ -78,7 +87,12 @@ export function createWorld(seed, settings = DEFAULT_SETTINGS) {
     return { x: spawn.x + Math.cos(ang) * rad, z: spawn.z + Math.sin(ang) * rad };
   }, START_LAYOUT[cfg.startVillagers]);
   state.animals = createDeer(state);
+  state.manualJobs = true;
+  state.waterIntro = true;
   pushEvent(state, 'ยินดีต้อนรับสู่หมู่บ้านใหม่ของคุณ เริ่มสร้างโรงตัดไม้และโกดังได้เลย');
+  pushEvent(state, '👥 ชาวบ้านยังไม่มีงาน — เปิด "จัดการงาน" แล้วมอบหมายช่างก่อสร้างก่อน จากนั้นจึงส่งคนไปทำงานที่อาคารต่างๆ', {
+    kind: 'info', detail: 'ระบบจะไม่ส่งใครไปทำงานเอง ช่างก่อสร้างขนวัสดุและสร้างอาคาร ส่วนอาคารผลิตต้องเลือกคนงานเองที่แผงของอาคาร',
+  });
   return state;
 }
 
@@ -148,7 +162,8 @@ export function summary(state) {
     homeless: state.villagers.filter((v) => v.homeId == null).length, housing,
     happiness: residents > 0 ? weighted / residents : 1,
     day: c.day, hour: c.hour, isNight: c.isNight,
-    unemployed: state.villagers.filter((v) => v.jobId == null && canBuild(v)).length,
+    unemployed: workforceSummary(state).free,
+    workforce: workforceSummary(state),
     sick: state.villagers.filter((v) => v.sick).length,
     ...populationCounts(state), births: state.births ?? 0, deaths: state.deaths ?? 0,
     ownedPlots: ownedPlotCount(state), totalPlots: (state.world?.plots ?? 0) ** 2,
@@ -199,13 +214,6 @@ export function paintZone(state, kind, x, z, r) {
   return zone.id;
 }
 
-export function setDesiredWorkers(state, bId, n) {
-  const b = getBuilding(state, bId);
-  if (!b) return;
-  const max = BUILDINGS[b.type].workers ?? 0;
-  b.desiredWorkers = Math.max(0, Math.min(max, Math.floor(n)));
-}
-
 function deliveredMaterials(b) {
   const out = {};
   const add = (cost, needed = {}) => {
@@ -238,7 +246,7 @@ function removeBuilding(state, b) {
   refund(state, b);
   state.buildings.splice(state.buildings.indexOf(b), 1);
   for (const v of state.villagers) {
-    if (v.jobId === b.id) v.jobId = null;
+    if (v.jobId === b.id) v.jobId = null;   // the post is gone: the villager becomes free
     if (v.homeId === b.id) v.homeId = null;
     if (referencesBuilding(v, b.id)) failVillager(state, v);
   }
@@ -300,6 +308,7 @@ function finishConstruction(state, b) {
   b.progress = 1;
   const cfg = BUILDINGS[b.type];
   if (cfg.storage) b.stock = emptyStock();
+  else if (cfg.job === 'market') ensureMarket(b);
   else if (cfg.supply) b.stock = { [cfg.supply]: 0 };
   pushEvent(state, `${BUILDINGS[b.type].name}สร้างเสร็จแล้ว`);
 }
@@ -321,50 +330,6 @@ function slowTick(state, dt) {
   decayWear(state.wear, dt);
 }
 
-function assignJobs(state) {
-  const jobs = state.buildings.filter((b) => b.built && BUILDINGS[b.type].job);
-  const jobById = new Map(jobs.map((b) => [b.id, b]));
-  // Children, pregnant, sick villagers and elders in heavy jobs lose their post.
-  for (const v of state.villagers) {
-    if (v.jobId == null) continue;
-    const b = jobById.get(v.jobId);
-    if (!b || !canTakeJob(v, b)) v.jobId = null;
-  }
-  for (const b of jobs) {
-    const mine = state.villagers.filter((v) => v.jobId === b.id);
-    while (mine.length > effectiveWorkers(b)) mine.pop().jobId = null;
-    b.workers = mine.map((v) => v.id);
-  }
-  // Keep a few able adults free as builders/haulers while there is construction work.
-  const openSites = state.buildings.filter((b) => !b.built || b.upgrading).length;
-  const reserve = Math.min(BUILDER_RESERVE, openSites);
-  const free = state.villagers.filter((v) => v.jobId == null && canBuild(v));
-  for (let i = jobs.length - 1; i >= 0 && free.length < reserve; i--) {
-    const b = jobs[i];
-    for (let j = b.workers.length - 1; j >= 0 && free.length < reserve; j--) {
-      const v = state.villagers.find((w) => w.id === b.workers[j]);
-      if (!v || !canBuild(v)) continue;   // elders cannot act as builders anyway
-      v.jobId = null;
-      b.workers.splice(j, 1);
-      free.push(v);
-    }
-  }
-  // Elders are never builders, so they fill light jobs first.
-  const elders = state.villagers.filter((v) => v.jobId == null && canWork(v) && !canBuild(v));
-  for (const b of jobs) {
-    while (b.workers.length < effectiveWorkers(b)) {
-      let v = null;
-      if (BUILDINGS[b.type].light && elders.length > 0) v = elders.shift();
-      else if (free.length > reserve) v = free.shift();
-      if (!v) break;
-      v.jobId = b.id;
-      b.workers.push(v.id);
-      // drop an idle stroll so the new worker starts right away
-      if (v.role === 'idle' && !v.carry) v.queue = [];
-    }
-  }
-}
-
 function stepWorld(state, dt) {
   state.tick += 1;
   const rand = mulberry32(state.seed * 7919 + state.tick);
@@ -376,7 +341,7 @@ function stepWorld(state, dt) {
   if (Math.floor(state.time) !== before) {
     processDeaths(state);
     updateBuildingStatus(state);
-    assignJobs(state);
+    syncJobs(state);
     for (const b of state.buildings) if (b.type === 'house' && b.built) evaluateHouse(state, b);
     assignHomes(state);
     planHouses(state, rand);

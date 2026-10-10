@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { world as createWorld } from './helpers.js';
 import { mulberry32 } from '../src/rng.js';
-import { tick, summary, villagerAt, villagerInfo, household } from '../src/sim.js';
+import {
+  tick, summary, villagerAt, villagerInfo, household, assignJob, waitingReason, BUILDER,
+} from '../src/sim.js';
 import { processMidnight, assignHomes, planHouses } from '../src/needs.js';
 import {
   processDeaths, processMarriages, processPregnancies, leaveHome, spawnImmigrantGroup, packUnits,
@@ -141,7 +143,6 @@ test('children never get jobs, never build, and play near home', () => {
   const kids = [3, 6, 9, 13].map((a, i) => childOf(s, mum, dad, a, i % 2 ? 'f' : 'm'));
   const home = house(s, SPAWN.x + 16, SPAWN.z + 4, [mum, dad, ...kids]);
   const wc = addBuilt(s, 'woodcutter', SPAWN.x - 10, SPAWN.z + 10);
-  wc.desiredWorkers = 2;
   addBuilt(s, 'storehouse', SPAWN.x + 6, SPAWN.z - 12);
   const site = s.buildings.at(-1);
   site.built = false;
@@ -160,29 +161,27 @@ test('children never get jobs, never build, and play near home', () => {
   assert.deepEqual(wc.workers.filter((id) => kids.some((k) => k.id === id)), []);
 });
 
-test('pregnant women and sick villagers are unassigned from their jobs', () => {
+test('pregnant women and sick villagers keep their post but do not work until able', () => {
   const s = emptyWorld();
   const wc = addBuilt(s, 'woodcutter', SPAWN.x - 10, SPAWN.z + 10);
-  wc.desiredWorkers = 2;
   const a = person(s, { gender: 'f' });
   const b = person(s, { gender: 'm' });
   const c = person(s, { gender: 'm' });
   tick(s, 1.5);
-  assert.equal(wc.workers.length, 2);
-  const [w1, w2] = s.villagers.filter((v) => v.jobId === wc.id);
-  w1.pregnant = true;
-  w2.sick = true;
+  assert.equal(wc.workers.length, 0, 'nobody is put to work automatically');
+  assert.equal(assignJob(s, a.id, wc.id).ok, true);
+  assert.equal(assignJob(s, b.id, wc.id).ok, true);
+  assert.equal(assignJob(s, c.id, wc.id).ok, false, 'only 2 slots');
+  a.pregnant = true;
+  b.sick = true;
+  a.queue = [];
   tick(s, 1.5);
-  assert.equal(w1.jobId, null);
-  assert.equal(w2.jobId, null);
-  assert.ok(!wc.workers.includes(w1.id) && !wc.workers.includes(w2.id));
-  assert.equal(wc.workers.length, 1);   // the third villager took over one post; the others stay out
-  assert.ok([a, b, c].filter((v) => v.jobId === wc.id).every((v) => !v.pregnant && !v.sick));
-  // after recovery they can be hired again
-  w2.sick = false;
-  w1.pregnant = false;
-  tick(s, 1.5);
-  assert.equal(wc.workers.length, 2);
+  assert.equal(a.jobId, wc.id);
+  assert.equal(b.jobId, wc.id);
+  assert.deepEqual([...wc.workers].sort(), [a.id, b.id].sort());
+  assert.equal(c.jobId, null, 'the free villager is not hired by itself');
+  assert.ok(!a.queue.some((t) => t.kind === 'gather'), 'pregnant worker waits instead of chopping');
+  assert.match(waitingReason(s, a), /ตั้งครรภ์/);
 });
 
 test('elders only take light jobs, lose heavy ones, and never build', () => {
@@ -192,40 +191,44 @@ test('elders only take light jobs, lose heavy ones, and never build', () => {
   const gran = person(s, { age: ELDER_AGE + 5 });
   gran.jobId = wc.id;   // aged into an elder while chopping
   tick(s, 1.5);
-  assert.equal(gran.jobId, chapel.id);
-  assert.deepEqual(chapel.workers, [gran.id]);
+  assert.equal(gran.jobId, null);
   assert.ok(!wc.workers.includes(gran.id));
-  // never a builder / hauler
+  assert.ok(s.events.some((e) => e.vId === gran.id && /อายุมากแล้ว/.test(e.text)));
+  assert.equal(assignJob(s, gran.id, wc.id).ok, false);
+  assert.equal(assignJob(s, gran.id, BUILDER).ok, false);
+  assert.equal(assignJob(s, gran.id, chapel.id).ok, true);
+  assert.deepEqual(chapel.workers, [gran.id]);
+  // never a builder / hauler, even when flagged by hand
   const site = addBuilt(s, 'storehouse', SPAWN.x, SPAWN.z + 30);
   site.built = false;
   site.needed = { wood: 5 };
-  gran.jobId = null;
+  assignJob(s, gran.id, null);
+  gran.builder = true;
   gran.queue = [];
   planNext(s, gran, mulberry32(1));
   assert.ok(gran.queue.every((t) => t.kind === 'goto' || t.kind === 'wait'), JSON.stringify(gran.queue));
   assert.notEqual(gran.role, 'builder');
-  // an adult next to him does build/haul
+  // an adult next to him builds/hauls only once assigned to the builder crew
   const adult = person(s, { age: 30 });
+  planNext(s, adult, mulberry32(1));
+  assert.notEqual(adult.role, 'builder');
+  adult.queue = [];
+  assert.equal(assignJob(s, adult.id, BUILDER).ok, true);
   planNext(s, adult, mulberry32(1));
   assert.equal(adult.role, 'builder');
 });
 
-test('builder reserve counts only able adults', () => {
+test('a child growing up is announced and stays free until assigned', () => {
   const s = emptyWorld();
-  const wc = addBuilt(s, 'woodcutter', SPAWN.x - 10, SPAWN.z + 10);
-  wc.desiredWorkers = 2;
-  const site = addBuilt(s, 'storehouse', SPAWN.x, SPAWN.z + 30);
-  site.built = false;
-  site.needed = { wood: 15 };
-  person(s, { age: 20 });
-  person(s, { age: 21 });
-  person(s, { age: 22 });
-  person(s, { gender: 'f', age: 9 });
-  person(s, { gender: 'f', age: 25, pregnant: true });
+  const kid = person(s, { age: 13.9 });
   tick(s, 1.5);
-  // reserve = min(3, open sites) = 1 -> with 3 able adults, two work and one stays free
-  assert.equal(wc.workers.length, 2);
-  assert.equal(s.villagers.filter((v) => v.jobId == null && v.age >= 18 && !v.pregnant).length, 1);
+  assert.equal(kid.minor, true);
+  kid.age = 14.1;
+  tick(s, 1.5);
+  assert.equal(kid.minor, undefined);
+  assert.ok(s.events.some((e) => e.vId === kid.id && /โตเป็นผู้ใหญ่/.test(e.text)));
+  assert.equal(kid.jobId, null);
+  assert.equal(kid.builder, false);
 });
 
 test('speed: elders, children and pregnant women walk slower', () => {

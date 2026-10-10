@@ -67,28 +67,36 @@ test('cathedralDone only when the cathedral is built', () => {
 
 test('evaluateHouse computes needsMet and happiness fractions', () => {
   const s = emptyWorld();
-  const h1 = addHouse(s, 100, 100, 2, 1);
+  const h1 = addHouse(s, 100, 100, 2, 1);   // within WATER_RADIUS of the townhall's well
   evaluateHouse(s, h1);
   assert.equal(h1.needsMet.food, true);
+  assert.equal(h1.needsMet.water, true);
   assert.equal(h1.happiness, 1);
   h1.starvedToday = true;
   evaluateHouse(s, h1);
+  assert.equal(h1.happiness, 0.5);
+  h1.parchedToday = true;
+  evaluateHouse(s, h1);
+  assert.equal(h1.needsMet.water, false);
   assert.equal(h1.happiness, 0);
 
   const h2 = addHouse(s, 100, 120, 2, 2);
   evaluateHouse(s, h2);
-  assert.equal(h2.happiness, 0.5);      // food ok, religion missing
+  assert.equal(h2.happiness, 2 / 3);    // food + water ok, religion missing
   addStaffedService(s, 'chapel', 110, 120);
   evaluateHouse(s, h2);
   assert.equal(h2.happiness, 1);
 
-  const h3 = addHouse(s, 90, 140, 2, 3);
-  addStaffedService(s, 'chapel', 90, 150);
+  const h3 = addHouse(s, 60, 170, 2, 3);
   evaluateHouse(s, h3);
-  assert.equal(h3.happiness, 0.4);      // food + religion of food/variety2/religion/entertainment/health
+  assert.equal(h3.needsMet.water, false, 'no well in reach');
+  addBuilt(s, 'well', 66, 170);
+  addStaffedService(s, 'chapel', 60, 180);
+  evaluateHouse(s, h3);
+  assert.equal(h3.happiness, 0.5);      // food + water + religion of food/water/variety2/religion/entertainment/health
   h3.foodsToday = ['bread', 'fish'];
   evaluateHouse(s, h3);
-  assert.equal(h3.happiness, 0.6);
+  assert.equal(h3.happiness, 4 / 6);
 
   const h0 = addHouse(s, 40, 40, 0, 1);
   evaluateHouse(s, h0);
@@ -101,10 +109,10 @@ test('processMidnight pays tax scaled by happiness', () => {
   addHouse(s, 100, 100, 3, 1);
   processMidnight(s, mulberry32(1));
   assert.equal(s.gold, 3);
-  const h2 = addHouse(s, 100, 120, 2, 2);   // food only -> happiness 0.5, tax 2*2*0.5
+  const h2 = addHouse(s, 100, 120, 2, 2);   // food + water of 3 -> happiness 2/3, tax 2*2*2/3
   h2.starvedToday = false;
   processMidnight(s, mulberry32(1));
-  assert.equal(s.gold, 3 + 3 + 2);
+  assert.ok(Math.abs(s.gold - (3 + 3 + 8 / 3)) < 0.11, String(s.gold));
 });
 
 test('processMidnight starts an upgrade when all next-level needs are met', () => {
@@ -161,11 +169,13 @@ test('unhappy house loses a resident after LEAVE_AFTER_DAYS days', () => {
   const leaver = s.villagers[1].id;
   for (let day = 1; day < LEAVE_AFTER_DAYS; day++) {
     h.starvedToday = true;
+    h.parchedToday = true;
     processMidnight(s, mulberry32(day));
     assert.equal(s.villagers.length, 2);
     assert.equal(h.unhappyDays, day);
   }
   h.starvedToday = true;
+  h.parchedToday = true;
   processMidnight(s, mulberry32(9));
   assert.equal(s.villagers.length, 1);
   assert.equal(h.residents.length, 1);
@@ -232,4 +242,52 @@ test('planHouses warns once per day when homeless but no residential zone', () =
   s.time += DAY_LENGTH;
   planHouses(s, rand);
   assert.equal(count(), 2);
+});
+
+// ---------------------------------------------------------------- thirst & wells
+
+test('thirsty villagers walk to the nearest water source and drink', async () => {
+  const { stepVillager } = await import('../src/villagers.js');
+  const { nearestWater } = await import('../src/water.js');
+  const s = emptyWorld();
+  const v = addVillager(s, SPAWN.x + 40, SPAWN.z + 40);
+  const well = addBuilt(s, 'well', SPAWN.x + 48, SPAWN.z + 40);
+  assert.equal(nearestWater(s, v.x, v.z).b, well, 'the well is nearer than the townhall');
+  v.thirst = 0.7;
+  const rand = mulberry32(3);
+  for (let i = 0; i < 100 && v.thirst > 0.1; i++) stepVillager(s, v, 0.1, rand);
+  assert.ok(v.thirst < 0.1, `drank, thirst ${v.thirst}`);
+  assert.ok(Math.hypot(v.x - well.x, v.z - well.z) < 4);
+});
+
+test('walking makes villagers thirstier and hungrier than standing still', async () => {
+  const { stepVillager } = await import('../src/villagers.js');
+  const s = emptyWorld();
+  const still = addVillager(s, SPAWN.x + 20, SPAWN.z);
+  const walker = addVillager(s, SPAWN.x + 20, SPAWN.z + 5);
+  const loaded = addVillager(s, SPAWN.x + 20, SPAWN.z + 10);
+  still.queue = [{ kind: 'wait', t: 99 }];
+  walker.queue = [{ kind: 'goto', x: SPAWN.x + 60, z: SPAWN.z + 5 }];
+  loaded.queue = [{ kind: 'goto', x: SPAWN.x + 60, z: SPAWN.z + 10 }];
+  loaded.carry = { res: 'stone', n: 5 };
+  for (const v of [still, walker, loaded]) { v.hunger = 0; v.thirst = 0; v.role = 'worker'; }
+  const rand = mulberry32(1);
+  for (let i = 0; i < 50; i++) for (const v of [still, walker, loaded]) stepVillager(s, v, 0.1, rand);
+  assert.ok(walker.thirst > still.thirst && walker.hunger > still.hunger);
+  assert.ok(loaded.thirst > walker.thirst, 'a load makes walking harder');
+});
+
+test('a parched resident fails the house water need until midnight', async () => {
+  const { stepVillager } = await import('../src/villagers.js');
+  const s = emptyWorld();
+  const h = addHouse(s, 100, 100, 1, 1);
+  const v = s.villagers.at(-1);
+  v.thirst = 0.95;
+  v.queue = [{ kind: 'wait', t: 99 }];
+  stepVillager(s, v, 0.1, mulberry32(1));
+  assert.equal(h.parchedToday, true);
+  evaluateHouse(s, h);
+  assert.equal(h.needsMet.water, false);
+  processMidnight(s, mulberry32(1));
+  assert.equal(h.parchedToday, false);
 });

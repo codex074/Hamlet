@@ -489,6 +489,7 @@ test('difficulty scales hunger', () => {
     setDifficulty(s, level);
     const v = s.villagers[0];
     v.hunger = 0;
+    v.queue = [{ kind: 'wait', t: 99 }];   // standing still: no walking exertion
     stepVillager(s, v, 10, mulberry32(1));
     return v.hunger;
   };

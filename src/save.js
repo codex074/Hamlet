@@ -1,5 +1,5 @@
 // Save / load. Pure except for optional globalThis.localStorage access (always inside try/catch).
-import { GRID, BUILDINGS, DEER_RESPAWN_SEC, MAP_SIZES, PLOT_SIZE, DIFFICULTY } from './config.js';
+import { GRID, BUILDINGS, DEER_RESPAWN_SEC, MAP_SIZES, PLOT_SIZE, DIFFICULTY, CHILD_AGE, ELDER_AGE } from './config.js';
 import { generateTerrain, generateNodes } from './terrain.js';
 import { createDeer } from './animals.js';
 import { emptyNeeds } from './needs.js';
@@ -7,6 +7,7 @@ import { migrateVillagersToV3 } from './families.js';
 import { normalizeSettings, worldDims, LEGACY_SETTINGS } from './settings.js';
 import { allOwnedTerritory } from './territory.js';
 import { countNodes } from './regrowth.js';
+import { pushEvent } from './events.js';
 
 const SAVE_KEY = 'hamlet-save-v1';
 const SAVE_VERSION = 4;
@@ -105,6 +106,28 @@ function repairV4(state) {
   state.territory.bought = Number.isFinite(state.territory.bought) ? state.territory.bought : 0;
 }
 
+// Saves from before manual job assignment: the jobless adults used to build and haul by themselves,
+// so they join the builder crew and the village keeps running exactly as before.
+function migrateManualJobs(state) {
+  if (state.manualJobs) return;
+  state.manualJobs = true;
+  for (const v of state.villagers) {
+    const adult = (v.age ?? 30) >= CHILD_AGE && (v.age ?? 30) < ELDER_AGE;
+    v.builder = v.jobId == null && adult;
+    if ((v.age ?? 30) < CHILD_AGE) v.minor = true;
+  }
+  for (const b of state.buildings) delete b.desiredWorkers;
+}
+
+// Saves from before thirst: tell the player once that houses now need a well nearby.
+function introduceWater(state) {
+  if (state.waterIntro) return;
+  state.waterIntro = true;
+  pushEvent(state, '💧 ชาวบ้านต้องดื่มน้ำแล้ว — สร้างบ่อน้ำใกล้บ้านและที่ทำงาน (แท็บบริการ)', {
+    kind: 'info', detail: 'บ้านทุกระดับต้องการน้ำดื่ม: มีบ่อน้ำ ศาลากลาง หรือตลาดในระยะใกล้ ยิ่งเดินไกลยิ่งหิวและกระหายเร็ว',
+  });
+}
+
 export function deserialize(str) {
   const data = parseSave(str);
   const settings = data.version >= 4 ? normalizeSettings(data.settings) : LEGACY_SETTINGS;
@@ -115,6 +138,8 @@ export function deserialize(str) {
   if (data.version <= 2) migrateV2(state);
   if (data.version <= 3) migrateV3(state);
   else repairV4(state);
+  migrateManualJobs(state);
+  introduceWater(state);
   return state;
 }
 

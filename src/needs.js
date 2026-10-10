@@ -2,7 +2,7 @@
 import {
   DAY_LENGTH, NIGHT_START, NIGHT_END, BUILDINGS, HOUSE_LEVELS, SERVICE_STAFFED_DIST,
   IMMIGRATION_MIN_HAPPINESS, IMMIGRATION_MAX_HOMELESS, LEAVE_HAPPINESS, LEAVE_AFTER_DAYS, NEED_INFO,
-  EDGE_MARGIN, FOODS, CLOTH_PER_HOUSE_PER_DAY, TOOLS_PER_BUILDING_PER_DAY,
+  EDGE_MARGIN, FOODS, CLOTH_PER_HOUSE_PER_DAY, TOOLS_PER_BUILDING_PER_DAY, WATER_RADIUS,
 } from './config.js';
 import { mulberry32 } from './rng.js';
 import { distance, nearestStorage, addStock, takeStock, totalStock } from './economy.js';
@@ -21,6 +21,7 @@ import { foodSummary } from './status.js';
 import { sizeOf, spawnOf } from './world.js';
 import { removeNode, getNode } from './nodeindex.js';
 import { difficultyOf } from './settings.js';
+import { wellNear } from './water.js';
 
 export { pushEvent };
 const NO_ZONE_MESSAGE = 'ระบายโซนที่อยู่อาศัยเพื่อให้ชาวบ้านสร้างบ้าน';
@@ -74,6 +75,7 @@ export function evaluateHouse(state, house) {
   const foods = house.foodsToday?.length ?? 0;
   house.needsMet = {
     food: house.residents.length > 0 && !house.starvedToday,
+    water: house.residents.length > 0 && !house.parchedToday && wellNear(state, house),
     variety2: foods >= 2,
     variety3: foods >= 3,
     religion: serviceCovered(state, house, 'religion'),
@@ -90,7 +92,7 @@ export function evaluateHouse(state, house) {
 
 export function emptyNeeds() {
   return {
-    food: false, variety2: false, variety3: false, religion: false, entertainment: false,
+    food: false, water: false, variety2: false, variety3: false, religion: false, entertainment: false,
     health: false, clothing: false, cathedral: false,
   };
 }
@@ -110,11 +112,11 @@ export function newBuilding(state, type, x, z, rot) {
   const b = {
     id: state.nextId++, type, x, z, rot, cost,
     built: false, progress: 0, needed: { ...cost }, incoming: {},
-    desiredWorkers: cfg.workers ?? 0, workers: [],
+    workers: [],
   };
   if (type === 'house') {
     Object.assign(b, {
-      zoneId: null, level: 1, residents: [], upgrading: false, starvedToday: false, foodsToday: [],
+      zoneId: null, level: 1, residents: [], upgrading: false, starvedToday: false, parchedToday: false, foodsToday: [],
       happiness: 1, unhappyDays: 0, autoUpgrade: true, needsMet: emptyNeeds(),
     });
   } else {
@@ -196,6 +198,10 @@ function needReason(state, house, key) {
       if (f.stock <= 0) return 'คลังอาหารหมด มีคนในบ้านหิวจนเกือบอด';
       return 'มีคนในบ้านหิวจนเกือบอด — โกดังที่มีอาหารอาจอยู่ไกลจากบ้านเกินไป ลองสร้างโกดังใกล้ย่านบ้าน';
     }
+    case 'water': {
+      if (!wellNear(state, house)) return `ไม่มีบ่อน้ำในระยะ ${WATER_RADIUS} ม. — สร้างบ่อน้ำใกล้บ้าน (ศาลากลางและตลาดก็มีบ่อน้ำ)`;
+      return 'มีคนในบ้านกระหายน้ำจนเกือบขาดน้ำ — แหล่งน้ำอาจอยู่ไกลจากที่ทำงาน ลองสร้างบ่อน้ำเพิ่ม';
+    }
     case 'variety2':
     case 'variety3': {
       const n = (house.foodsToday ?? []).length;
@@ -244,6 +250,7 @@ function processHouse(state, house) {
   if (house.autoUpgrade && upgradeStatus(state, house).canUpgrade) startUpgrade(state, house);
   updateUnhappiness(state, house);
   house.starvedToday = false;
+  house.parchedToday = false;
   house.foodsToday = [];
   return Math.round(income * 10) / 10;
 }

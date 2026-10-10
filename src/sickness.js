@@ -1,6 +1,6 @@
 // Sickness: nightly rolls, untreated villagers moving away. Pure: no DOM, no globals.
 import {
-  SICK_CHANCE_PER_DAY, SICK_HUNGRY_MUL, SICK_COVERED_MUL, SICK_LEAVE_DAYS,
+  SICK_CHANCE_PER_DAY, SICK_HUNGRY_MUL, SICK_THIRSTY_MUL, SICK_COVERED_MUL, SICK_LEAVE_DAYS,
 } from './config.js';
 import { difficultyOf } from './settings.js';
 import { pushEvent } from './events.js';
@@ -32,6 +32,7 @@ function sickChance(state, v) {
   const home = state.buildings.find((b) => b.id === v.homeId);
   let p = SICK_CHANCE_PER_DAY * difficultyOf(state).sickness;
   if (home?.starvedToday) p *= SICK_HUNGRY_MUL;
+  if (home?.parchedToday) p *= SICK_THIRSTY_MUL;
   if (home?.needsMet?.health) p *= SICK_COVERED_MUL;
   return p;
 }

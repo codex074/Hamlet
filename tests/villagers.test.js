@@ -6,7 +6,8 @@ import { tick, removeAt } from '../src/sim.js';
 import { totalStock } from '../src/economy.js';
 import { NODE_AMOUNT } from '../src/config.js';
 import {
-  world, townhall, addBuilt, addSite, nearestNode, SPAWN, findPlaceSpot, clearVillagers, addVillager,
+  world, townhall, addBuilt, addSite, nearestNode, SPAWN, findPlaceSpot, clearVillagers, addVillager, hire,
+  makeBuilders,
 } from './helpers.js';
 
 function runSteps(state, v, seconds, rand = mulberry32(5)) {
@@ -20,7 +21,7 @@ test('hungry villager walks to storage and eats', () => {
   v.x = SPAWN.x + 20;
   const before = s.buildings[0].stock.berries;
   runSteps(s, v, 15);
-  assert.ok(v.hunger < 0.1, `hunger reset, got ${v.hunger}`);
+  assert.ok(v.hunger < 0.2, `hunger reset (walking afterwards adds a little), got ${v.hunger}`);
   assert.equal(s.buildings[0].stock.berries, before - 1);
 });
 
@@ -54,6 +55,7 @@ test('woodcutter workers gather a tree and deliver wood within 60 s', () => {
   const wc = addBuilt(s, 'woodcutter', spot.x, spot.z);
   const wood0 = totalStock(s).wood;
   const treeSum = s.nodes.filter((n) => n.kind === 'tree').reduce((a, n) => a + n.amount, 0);
+  hire(s, wc);
   tick(s, 60);
   assert.equal(wc.workers.length, 2);
   assert.ok(totalStock(s).wood > wood0, 'wood delivered to storage');
@@ -66,6 +68,9 @@ test('builder hauls materials to a site and completes it', () => {
   const s = world();
   const site = addSite(s, 'storehouse', SPAWN.x + 14, SPAWN.z);
   const wood0 = totalStock(s).wood;
+  tick(s, 30);
+  assert.equal(site.progress, 0, 'nobody builds without an assigned builder');
+  makeBuilders(s);
   tick(s, 90);
   assert.equal(site.built, true);
   assert.deepEqual(site.needed, { wood: 0 });
@@ -79,6 +84,7 @@ test('planNext reserves materials for the lowest-id site', () => {
   const a = addSite(s, 'storehouse', SPAWN.x + 14, SPAWN.z);
   addSite(s, 'woodcutter', SPAWN.x - 14, SPAWN.z);
   const v = s.villagers[0];
+  v.builder = true;
   planNext(s, v, mulberry32(1));
   assert.equal(v.role, 'builder');
   assert.equal(v.res.siteId, a.id);
@@ -92,6 +98,7 @@ test('removing the target site mid-delivery fails gracefully and returns the loa
   const site = addSite(s, 'storehouse', SPAWN.x + 25, SPAWN.z);
   clearVillagers(s);
   const v = addVillager(s, SPAWN.x, SPAWN.z);
+  v.builder = true;
   const rand = mulberry32(2);
   for (let i = 0; i < 400 && !(v.carry && v.queue[0]?.kind === 'goto' && v.queue[1]?.kind === 'deliver'); i++) {
     stepVillager(s, v, 0.1, rand);

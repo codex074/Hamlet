@@ -85,7 +85,7 @@ test('upgradeStatus lists the next-level checklist, cost and missing materials',
   let st = upgradeStatus(s, h);
   assert.equal(st.level, 1);
   assert.equal(st.nextLevel, 2);
-  assert.deepEqual(st.needs.map((n) => [n.key, n.met]), [['food', true], ['religion', false]]);
+  assert.deepEqual(st.needs.map((n) => [n.key, n.met]), [['food', true], ['water', true], ['religion', false]]);
   assert.equal(st.canUpgrade, false);
   assert.match(st.reason, /ศาสนา/);
   assert.deepEqual(st.cost, { planks: 6 });

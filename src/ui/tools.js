@@ -162,6 +162,7 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     const d = BUILDINGS[type];
     if (!d) return 0;
     if (d.serviceRadius) return d.serviceRadius;   // service, doctor, market
+    if (d.waterRadius) return d.waterRadius;       // well: houses inside get drinking water
     if (d.job === 'gather') return GATHER_RADIUS;
     if (d.job === 'farm') return FIELD_RADIUS;
     if (d.job === 'fish') return FISH_RADIUS;

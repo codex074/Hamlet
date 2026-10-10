@@ -1,4 +1,4 @@
-// Building health: detects why a workplace cannot produce, pauses it so its workers move to other jobs,
+// Building health: detects why a workplace cannot produce, pauses it so its workers wait instead of looping,
 // and resumes it automatically once the cause is gone. Also keeps rolling food production/consumption stats.
 import {
   BUILDINGS, RESOURCE_INFO, FOODS, DAY_LENGTH, FIELD_RADIUS, GATHER_RADIUS, HUNT_RADIUS, HUNGER_PER_SEC, HUNGRY_AT,
@@ -9,6 +9,7 @@ import { isOwned } from './territory.js';
 import { pushEvent } from './events.js';
 
 const HOUR = DAY_LENGTH / 24;
+const WALKING_SHARE = 1.1;
 export const PAUSE_AFTER = 2 * HOUR;     // a blocked workplace is paused after 2 game hours
 const NODE_NAME = { tree: 'ต้นไม้', rock: 'ก้อนหิน', berry: 'พุ่มเบอร์รี่', ore: 'สายแร่เหล็ก' };
 const resName = (r) => RESOURCE_INFO[r]?.name ?? r;
@@ -51,6 +52,13 @@ export function buildingProblem(state, b) {
       if (!deer) return { code: 'no-game', text: `ไม่มีกวางในระยะ ${HUNT_RADIUS} ม.`, blocking: true };
       break;
     }
+    case 'market': {
+      const sell = Array.isArray(b.sell) ? b.sell : [cfg.supply];
+      const any = sell.some((r) => (b.stock?.[r] ?? 0) > 0 || storages(state).some((s) => (s.stock[r] ?? 0) > 0));
+      if (sell.length === 0) return { code: 'no-goods', text: 'ยังไม่ได้เลือกสินค้าที่จะขาย', blocking: false };
+      if (!any) return { code: 'no-supply', text: 'ไม่มีสินค้าที่เลือกไว้ในโกดังเลย — ร้านว่างเปล่า', blocking: false };
+      break;
+    }
     default: {
       if (cfg.supply && (b.stock?.[cfg.supply] ?? 0) <= 0
         && !storages(state).some((s) => (s.stock[cfg.supply] ?? 0) > 0)) {
@@ -58,8 +66,8 @@ export function buildingProblem(state, b) {
       }
     }
   }
-  if (b.desiredWorkers > 0 && (b.workers?.length ?? 0) === 0) {
-    return { code: 'no-workers', text: 'ไม่มีคนงาน — ต้องมีผู้ใหญ่ว่างงาน', blocking: false };
+  if ((cfg.workers ?? 0) > 0 && (b.workers?.length ?? 0) === 0) {
+    return { code: 'no-workers', text: 'ยังไม่มีคนงาน — กด "เพิ่มคนงาน" เพื่อมอบหมาย', blocking: false };
   }
   return null;
 }
@@ -91,14 +99,11 @@ export function updateBuildingStatus(state) {
       b.paused = true;
       pushEvent(state, `⚠️ ${BUILDINGS[b.type].name} หยุดชั่วคราว: ${p.text}`, {
         kind: 'warn', bId: b.id, x: b.x, z: b.z,
-        detail: 'คนงานถูกย้ายไปทำงานอื่นก่อน อาคารจะกลับมาทำงานเองเมื่อแก้ปัญหานี้แล้ว',
+        detail: 'คนงานยังประจำอาคารนี้แต่จะรอจนกว่าจะแก้ปัญหาได้ อาคารจะกลับมาทำงานเอง หรือย้ายคนงานไปงานอื่นได้ที่แผงอาคาร',
       });
     }
   }
 }
-
-// Workers a building should have right now (0 while paused).
-export const effectiveWorkers = (b) => (b.paused ? 0 : b.desiredWorkers);
 
 // ---------------------------------------------------------------- food statistics
 
@@ -124,7 +129,8 @@ export function recordFood(state, res, n, eaten = false) {
 
 // Meals the whole village needs per game day (each villager eats when hunger reaches HUNGRY_AT).
 export function foodDemandPerDay(state) {
-  const mealsEach = (DAY_LENGTH * HUNGER_PER_SEC * (difficultyOf(state)?.hunger ?? 1)) / HUNGRY_AT;
+  // ×WALKING_SHARE: walking adds hunger (WALK_HUNGER_PER_M), about a tenth on a typical day
+  const mealsEach = (DAY_LENGTH * HUNGER_PER_SEC * WALKING_SHARE * (difficultyOf(state)?.hunger ?? 1)) / HUNGRY_AT;
   return Math.round(state.villagers.length * mealsEach);
 }
 

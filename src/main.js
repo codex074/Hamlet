@@ -156,7 +156,8 @@ function boot(session) {
   const handlers = {
     selectTool: (t) => tools && tools.select(t),
     setSpeed,
-    setWorkers: (id, n) => sim.setDesiredWorkers(state, id, n),
+    assignJob: (vId, key) => sim.assignJob(state, vId, key),
+    setMarketGoods: (id, list) => sim.setMarketGoods(state, id, list),
     requestUpgrade: (id) => (typeof sim.requestUpgrade === 'function' ? sim.requestUpgrade(state, id) : { ok: false, reason: 'ยังอัปเกรดไม่ได้' }),
     setAutoUpgrade: (id, on) => { if (typeof sim.setAutoUpgrade === 'function') sim.setAutoUpgrade(state, id, on); },
     closeInfo: () => tools && tools.deselect(),
@@ -224,6 +225,7 @@ function boot(session) {
       case 'Digit1': case 'Numpad1': setSpeed(1); break;
       case 'Digit2': case 'Numpad2': setSpeed(2); break;
       case 'Digit3': case 'Numpad3': setSpeed(3); break;
+      case 'KeyJ': hud.openWorkforce(); break;
       default: break;
     }
   });

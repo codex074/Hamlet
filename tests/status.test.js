@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, tick, summary } from '../src/sim.js';
+import { createWorld, tick, summary, assignJob } from '../src/sim.js';
 import { buildingProblem, updateBuildingStatus, PAUSE_AFTER, recordFood, foodSummary } from '../src/status.js';
 import { emptyStock } from '../src/economy.js';
 import { BUILDINGS, DAY_LENGTH } from '../src/config.js';
@@ -11,7 +11,7 @@ function world() {
 function addBuilt(state, type, x, z) {
   const b = {
     id: state.nextId++, type, x, z, rot: 0, built: true, progress: 1, needed: {}, incoming: {},
-    workers: [], desiredWorkers: BUILDINGS[type].workers,
+    workers: [],
   };
   if (BUILDINGS[type].storage) b.stock = emptyStock();
   state.buildings.push(b);
@@ -43,16 +43,20 @@ test('processing building without inputs is reported; with inputs it is fine', (
   assert.notEqual(buildingProblem(s, bakery)?.code, 'no-input');   // may still warn 'no-workers'
 });
 
-test('paused buildings release their workers to other jobs', () => {
+test('paused buildings keep their assigned workers, who wait instead of working', () => {
   const s = world();
   const th = s.buildings.find((b) => b.type === 'townhall');
   const smith = addBuilt(s, 'blacksmith', th.x + 15, th.z + 5);
+  const v = s.villagers[0];
+  assert.equal(assignJob(s, v.id, smith.id).ok, true);
   for (let i = 0; i < 20; i++) tick(s, 0.1);
-  assert.equal(smith.workers.length, 1);
+  assert.deepEqual(smith.workers, [v.id]);
   s.time += PAUSE_AFTER + 1;
   for (let i = 0; i < 20; i++) tick(s, 0.1);
   assert.equal(smith.paused, true);
-  assert.equal(smith.workers.length, 0);
+  assert.deepEqual(smith.workers, [v.id]);
+  assert.equal(v.jobId, smith.id);
+  assert.ok(!v.queue.some((t) => t.kind === 'take' || t.kind === 'produce'));
 });
 
 test('food summary tracks production and consumption per day', () => {
@@ -74,7 +78,7 @@ test('a villager leaving explains who left and which needs were unmet', async ()
   const s = world();
   const th = s.buildings.find((b) => b.type === 'townhall');
   const house = addBuilt(s, 'house', th.x + 12, th.z);
-  house.level = 2; house.residents = []; house.needsMet = { food: true, religion: false };
+  house.level = 2; house.residents = []; house.needsMet = { food: true, water: true, religion: false };
   const reasons = unmetNeeds(s, house);
   assert.equal(reasons.length, 1);
   assert.equal(reasons[0].key, 'religion');

@@ -10,6 +10,7 @@ import { sizeOf } from './world.js';
 import { isOwned } from './territory.js';
 import { addNode, anyNodeWithin, nodesOfKind } from './nodeindex.js';
 import { wearAt } from './wear.js';
+import { restockTargets, stockMaxOf } from './market.js';
 import {
   DONE, FAIL, getBuilding, getVillager, gotoPoint, gotoBuilding, firstEntry, planWait, countdown,
   moveToward, workTime,
@@ -120,10 +121,10 @@ function staff(v, b) {
   v.queue.push(gotoBuilding(b, v.x, v.z, STAFF_GAP), { kind: 'staff', bId: b.id, t: SERVICE_SHIFT });
 }
 
-// Fetches `res` from a storage into the building's own stock; false if nothing to fetch.
-function planFetch(state, v, b, res) {
+// Fetches `res` from a storage into the building's own stock (up to `max`); false if nothing to fetch.
+function planFetch(state, v, b, res, max = SUPPLY_MAX) {
   b.stock ??= { [res]: 0 };
-  const missing = Math.floor(SUPPLY_MAX - (b.stock[res] ?? 0));
+  const missing = Math.floor(max - (b.stock[res] ?? 0));
   const store = missing >= 1 && nearestStorageWith(state, b.x, b.z, res, 1);
   if (!store) return false;
   const n = Math.min(CARRY_MAX, missing, Math.floor(store.stock[res]));
@@ -136,8 +137,12 @@ function planFetch(state, v, b, res) {
   return true;
 }
 
+// Merchants refill the emptiest of the goods the player chose to sell, then mind the stalls.
 function planMarket(state, v, b) {
-  if (!planFetch(state, v, b, BUILDINGS[b.type].supply)) staff(v, b);
+  for (const res of restockTargets(b)) {
+    if (planFetch(state, v, b, res, stockMaxOf(res))) return;
+  }
+  staff(v, b);
 }
 
 // ---------- doctor ----------

@@ -1,7 +1,7 @@
 // Small helpers shared by the villager AI modules (movement, task builders). Pure: no DOM, no globals.
 import {
   WALK_SPEED, WATER_SPEED_MUL, WEAR_PER_STEP, SICK_SPEED_MUL, BUILDINGS, TOOL_SPEED_BONUS,
-  CHILD_AGE, ELDER_AGE, ELDER_SPEED_MUL, CHILD_SPEED_MUL, PREGNANT_SPEED_MUL,
+  CHILD_AGE, ELDER_AGE, ELDER_SPEED_MUL, CHILD_SPEED_MUL, PREGNANT_SPEED_MUL, PARCHED_AT, PARCHED_SPEED_MUL,
 } from './config.js';
 import { addWear, speedMultiplier } from './wear.js';
 import { isWater } from './terrain.js';
@@ -39,6 +39,7 @@ export function ageSpeedMul(v) {
   const st = stageOf(v);
   let m = st === 'elder' ? ELDER_SPEED_MUL : st === 'child' ? CHILD_SPEED_MUL : 1;
   if (v.pregnant) m *= PREGNANT_SPEED_MUL;
+  if ((v.thirst ?? 0) >= PARCHED_AT) m *= PARCHED_SPEED_MUL;
   return m;
 }
 

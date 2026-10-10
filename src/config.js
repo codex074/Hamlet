@@ -58,7 +58,7 @@ export const RESOURCE_INFO = {
 // job kinds: 'gather' | 'farm' | 'process' | 'service' | 'fish' | 'ranch' | 'hunt' | 'doctor' | 'market' | null
 export const BUILDINGS = {
   townhall:   { name: 'ศาลากลาง', category: null, radius: 6, cost: {}, buildTime: 0,
-                storage: true, workers: 0, job: null, unlockPop: 0 },
+                storage: true, workers: 0, job: null, unlockPop: 0, water: true },
   storehouse: { name: 'โกดัง', category: 'resource', radius: 4.5, cost: { wood: 15 }, buildTime: 20,
                 storage: true, workers: 0, job: null, unlockPop: 0 },
   woodcutter: { name: 'คนตัดไม้', category: 'resource', radius: 3.5, cost: { wood: 8 }, buildTime: 15,
@@ -98,7 +98,10 @@ export const BUILDINGS = {
   infirmary:  { name: 'สถานพยาบาล', category: 'service', radius: 5, cost: { planks: 12, stone: 10 }, buildTime: 40,
                 workers: 2, job: 'doctor', service: 'health', serviceRadius: 50, supply: 'herbs', unlockPop: 15, light: true },
   market:     { name: 'ตลาด', category: 'service', radius: 6, cost: { planks: 15, stone: 6 }, buildTime: 40,
-                workers: 2, job: 'market', service: 'clothing', serviceRadius: 50, supply: 'cloth', unlockPop: 20, light: true },
+                workers: 2, job: 'market', service: 'clothing', serviceRadius: 50, supply: 'cloth', unlockPop: 12, light: true,
+                water: true },
+  well:       { name: 'บ่อน้ำ', category: 'service', radius: 1.8, cost: { stone: 6, wood: 4 }, buildTime: 10,
+                workers: 0, job: null, unlockPop: 0, water: true, waterRadius: 35 },
   cathedral:  { name: 'มหาวิหาร', category: 'monument', radius: 11, cost: {}, buildTime: 0,
                 workers: 0, job: null, unlockPop: 25, monument: true },
   house:      { name: 'บ้าน', category: null, radius: 3, cost: { wood: 6 }, buildTime: 12,
@@ -115,18 +118,19 @@ export const CATHEDRAL_STAGES = [
 // House levels (index = level - 1).
 // needs: 'food' | 'variety2' | 'variety3' | 'religion' | 'entertainment' | 'health' | 'clothing' | 'cathedral'
 export const HOUSE_LEVELS = [
-  { level: 1, name: 'ผู้มาใหม่', needs: ['food'], capacity: 3, tax: 1, upgradeCost: null },
-  { level: 2, name: 'ไพร่', needs: ['food', 'religion'], capacity: 4, tax: 2, upgradeCost: { planks: 6 } },
-  { level: 3, name: 'สามัญชน', needs: ['food', 'variety2', 'religion', 'entertainment', 'health'],
+  { level: 1, name: 'ผู้มาใหม่', needs: ['food', 'water'], capacity: 3, tax: 1, upgradeCost: null },
+  { level: 2, name: 'ไพร่', needs: ['food', 'water', 'religion'], capacity: 4, tax: 2, upgradeCost: { planks: 6 } },
+  { level: 3, name: 'สามัญชน', needs: ['food', 'water', 'variety2', 'religion', 'entertainment', 'health'],
     capacity: 5, tax: 4, upgradeCost: { stone: 8, planks: 6 } },
-  { level: 4, name: 'ชาวเมือง', needs: ['food', 'variety3', 'religion', 'entertainment', 'health', 'clothing'],
+  { level: 4, name: 'ชาวเมือง', needs: ['food', 'water', 'variety3', 'religion', 'entertainment', 'health', 'clothing'],
     capacity: 6, tax: 7, upgradeCost: { stone: 12, planks: 8 } },
-  { level: 5, name: 'ขุนนาง', needs: ['food', 'variety3', 'religion', 'entertainment', 'health', 'clothing', 'cathedral'],
+  { level: 5, name: 'ขุนนาง', needs: ['food', 'water', 'variety3', 'religion', 'entertainment', 'health', 'clothing', 'cathedral'],
     capacity: 7, tax: 12, upgradeCost: { stone: 20, planks: 12, tools: 4 } },
 ];
 
 export const NEED_INFO = {
   food:          'อาหาร',
+  water:         'น้ำดื่ม',
   variety2:      'อาหาร 2 ชนิด',
   variety3:      'อาหาร 3 ชนิด',
   health:        'สุขภาพ',
@@ -141,7 +145,6 @@ export const IMMIGRATION_MAX_HOMELESS = 6;
 export const LEAVE_HAPPINESS = 0.25;
 export const LEAVE_AFTER_DAYS = 2;
 export const REFUND_RATIO = 0.5;
-export const BUILDER_RESERVE = 3;      // villagers kept job-free while construction sites exist
 
 export const START = {
   villagers: 8,           // = couples * 2 + singles
@@ -151,15 +154,38 @@ export const START = {
   gold: 0,
 };
 
+// Thirst: rises a little faster than hunger; walking (more so with a load) makes villagers thirsty and
+// hungry sooner, so far-away work costs food and water. Sources: wells, the townhall and markets
+// (all `water: true`) and the shore of any river or lake inside the territory.
+export const THIRST_PER_SEC = 1 / 100;
+export const THIRSTY_AT = 0.6;
+export const PARCHED_AT = 0.9;              // like STARVING_AT: the house's water need fails that day
+export const SLEEP_THIRST_MUL = 0.25;       // thirst rises slowly while asleep
+export const WALK_THIRST_PER_M = 0.001;     // extra thirst per metre walked
+export const WALK_HUNGER_PER_M = 0.0005;    // extra hunger per metre walked
+export const CARRY_EXERTION_MUL = 1.5;      // walking with a load
+export const DRINK_TIME = 2;                // seconds spent drinking
+export const WATER_RADIUS = BUILDINGS.well.waterRadius;   // a house needs a well (or townhall / market) this close
+export const PARCHED_SPEED_MUL = 0.8;
+
 // Sickness
 export const SICK_CHANCE_PER_DAY = 0.04;    // base chance per villager per midnight
 export const SICK_HUNGRY_MUL = 2.5;         // if the villager starved that day
+export const SICK_THIRSTY_MUL = 2;          // if someone in the house was parched that day
 export const SICK_COVERED_MUL = 0.4;        // if their house has health coverage
 export const SICK_LEAVE_DAYS = 3;           // untreated sick villagers leave after this many midnights
 export const SICK_SPEED_MUL = 0.6;
 export const HEAL_TIME = 6;                 // seconds a doctor spends treating
 // Services that hold a supply (infirmary: herbs, market: cloth)
 export const SUPPLY_MAX = 10;               // stock a service building keeps on hand
+// Market: merchants carry the goods the player picked (up to MARKET_SLOTS) from storage to the stalls;
+// hungry villagers buy a meal there with the coins they earn by working, instead of walking to storage.
+export const MARKET_SLOTS = 4;
+export const MARKET_STOCK_MAX = 12;         // per food on the stalls (cloth keeps SUPPLY_MAX)
+export const MARKET_RESTOCK_AT = 0.5;       // merchants refill a good below this share of its max
+export const MARKET_PRICE = { berries: 1, fish: 2, meat: 2, bread: 3 };   // coins per meal
+export const MARKET_TREASURY_SHARE = 0.5;   // share of every sale paid into the village treasury (gold)
+export const WAGE_PER_TASK = 1;             // coins a villager earns for each finished piece of work
 export const CLOTH_PER_HOUSE_PER_DAY = 0.5; // consumed from the covering market at midnight
 export const HERBS_PER_HEAL = 1;
 // Tools

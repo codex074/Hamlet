@@ -3,7 +3,7 @@ import { SPAWN, BUILDINGS, HOUSE_LEVELS } from '../src/config.js';
 import { emptyStock } from '../src/economy.js';
 import { createVillager } from '../src/villagers.js';
 import { newBuilding } from '../src/needs.js';
-import { createWorld, canPlace, canPaintZone } from '../src/sim.js';
+import { createWorld, canPlace, canPaintZone, assignJob, BUILDER } from '../src/sim.js';
 
 // The classic 240 m map (centre = SPAWN) keeps fixed-coordinate tests simple.
 export const SMALL = { mapSize: 'small' };
@@ -59,6 +59,45 @@ export function addStaffedService(state, type, x, z) {
   w.jobId = b.id;
   b.workers.push(w.id);
   return b;
+}
+
+// Fills a workplace's free slots with free villagers, as the player would (jobs are never auto-assigned).
+export function hire(state, b, n = BUILDINGS[b.type].workers) {
+  const out = [];
+  for (const v of state.villagers) {
+    if (out.length >= n || b.workers.length >= BUILDINGS[b.type].workers) break;
+    if (v.jobId == null && !v.builder && assignJob(state, v.id, b.id).ok) out.push(v);
+  }
+  return out;
+}
+
+// Puts up to n free able adults on the builder crew.
+export function makeBuilders(state, n = Infinity) {
+  let k = 0;
+  for (const v of state.villagers) {
+    if (k >= n) break;
+    if (v.jobId == null && !v.builder && assignJob(state, v.id, BUILDER).ok) k += 1;
+  }
+  return k;
+}
+
+// Plays the role of an attentive player (mirrors the old automatic behaviour): keeps `builders` people
+// on the builder crew while there is construction, fills every open workplace slot, then puts everyone
+// still free on the builder crew too.
+export function staffVillage(state, builders = 3) {
+  const crew = () => state.villagers.filter((v) => v.builder);
+  const sites = state.buildings.some((b) => !b.built || b.upgrading);
+  if (sites && crew().length < builders) makeBuilders(state, builders - crew().length);
+  for (const b of state.buildings) {
+    if (!b.built || !BUILDINGS[b.type].job) continue;
+    hire(state, b);
+    // still short-handed: take builders beyond the reserve
+    for (const v of crew()) {
+      if (b.workers.length >= BUILDINGS[b.type].workers || crew().length <= builders) break;
+      assignJob(state, v.id, b.id);
+    }
+  }
+  makeBuilders(state);
 }
 
 export function clearVillagers(state) {

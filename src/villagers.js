@@ -2,8 +2,11 @@
 import {
   HUNGER_PER_SEC, HUNGRY_AT, STARVING_AT, CARRY_MAX, GATHER_RADIUS, FIELD_RADIUS, IDLE_WANDER_RADIUS,
   BUILDINGS, CATHEDRAL_STAGES, FOODS, UPGRADE_BUILD_TIME, DAY_LENGTH, CHILD_PLAY_RADIUS,
-  DEATH_AGE_MIN, DEATH_AGE_MAX,
+  DEATH_AGE_MIN, DEATH_AGE_MAX, THIRST_PER_SEC, THIRSTY_AT, PARCHED_AT, SLEEP_THIRST_MUL, WALK_THIRST_PER_M,
+  WALK_HUNGER_PER_M, CARRY_EXERTION_MUL, DRINK_TIME, WAGE_PER_TASK,
 } from './config.js';
+import { nearestFoodSource, buyMeal } from './market.js';
+import { nearestWater } from './water.js';
 import { recordFood } from './status.js';
 import { mulberry32, randRange } from './rng.js';
 import { pickGivenName, pickSurname, fullName } from './names.js';
@@ -55,7 +58,7 @@ export function createVillager(state, x, z, opts = {}) {
   const rName = pickGivenName(gender, rand);
   const rSurname = pickSurname(rand);
   return {
-    id, x, z, homeId: null, jobId: null, hunger: 0,
+    id, x, z, homeId: null, jobId: null, builder: false, hunger: 0, thirst: 0, coins: 0,
     carry: null, queue: [], res: {}, role: 'idle', sick: false, sickDays: 0, healer: null,
     name: opts.name ?? rName, surname: opts.surname ?? rSurname, gender,
     age: opts.age ?? rAge, deathAge: rDeath, spouseId: null, parents: [...(opts.parents ?? [])], children: [],
@@ -130,13 +133,30 @@ export function failVillager(state, v) {
 
 // ---------- planning ----------
 
+// Eats at the nearest storage (free) or market (paid with the villager's coins).
 function planEat(state, v) {
   if (v.hunger < HUNGRY_AT) return false;
-  const s = nearestFoodStorage(state, v.x, v.z);
-  if (!s) return false;
-  v.queue.push(gotoBuilding(s, v.x, v.z), { kind: 'eat', bId: s.id });
+  const src = nearestFoodSource(state, v);
+  if (!src) return false;
+  v.queue.push(gotoBuilding(src.b, v.x, v.z), { kind: src.market ? 'buy' : 'eat', bId: src.b.id });
   v.role = 'idle';
   return true;
+}
+
+// Thirsty villagers walk to the nearest well, townhall, market or riverbank.
+function planDrink(state, v) {
+  if ((v.thirst ?? 0) < THIRSTY_AT) return false;
+  const w = nearestWater(state, v.x, v.z);
+  if (!w) return false;
+  v.queue.push(w.b ? gotoBuilding(w.b, v.x, v.z) : gotoPoint(w.x, w.z), { kind: 'drink', t: DRINK_TIME });
+  v.role = 'idle';
+  return true;
+}
+
+// The more urgent of drinking and eating comes first.
+function planRefresh(state, v) {
+  if ((v.thirst ?? 0) >= v.hunger) return planDrink(state, v) || planEat(state, v);
+  return planEat(state, v) || planDrink(state, v);
 }
 
 function planSleep(state, v) {
@@ -272,7 +292,7 @@ export function planNext(state, v, rand) {
     failVillager(state, v);   // a stray load goes back to a storage first
     return;
   }
-  if (planEat(state, v)) return;
+  if (planRefresh(state, v)) return;
   if (v.sick) {
     planSick(state, v);
     return;
@@ -282,17 +302,13 @@ export function planNext(state, v, rand) {
     planWander(state, v, rand, Math.min(IDLE_WANDER_RADIUS, CHILD_PLAY_RADIUS));
     return;
   }
+  // Only the player assigns work: a workplace (jobId) or the builder crew. Assigned villagers who cannot
+  // work right now (pregnant, paused building) keep their post and wait nearby.
   if (v.jobId != null) {
     const job = getBuilding(state, v.jobId);
-    if (job && !canTakeJob(v, job)) v.jobId = null;   // pregnant / too old for a heavy job
-    else if (planJob(state, v, rand)) return;
-  }
-  if (canBuild(v)) {
-    if (planHaul(state, v)) {
-      v.role = 'builder';
-      return;
-    }
-    if (planBuild(state, v)) {
+    if (job && canTakeJob(v, job) && !job.paused && planJob(state, v, rand)) return;
+  } else if (v.builder && canBuild(v)) {
+    if (planHaul(state, v) || planBuild(state, v)) {
       v.role = 'builder';
       return;
     }
@@ -406,22 +422,43 @@ function execEat(state, v, t) {
   return FAIL;
 }
 
+function execBuy(state, v, t) {
+  const b = getBuilding(state, t.bId);
+  const food = b && buyMeal(state, v, b);
+  if (!food) return FAIL;   // sold out or closed meanwhile: the next plan picks another place
+  v.hunger = 0;
+  const home = getBuilding(state, v.homeId);
+  if (home?.foodsToday && !home.foodsToday.includes(food)) home.foodsToday.push(food);
+  return DONE;
+}
+
 function execStaff(state, v, t, dt) {
   const b = getBuilding(state, t.bId);
   if (!b || !b.built) return FAIL;
   return countdown(t, dt);
 }
 
-function execSleep(state, v) {
-  if (!clock(state).isNight) return DONE;
-  const starving = v.hunger >= HUNGRY_AT && nearestFoodStorage(state, v.x, v.z);
-  return starving ? DONE : undefined;   // wake up to eat when hungry and food exists
+// Hungry (with food in stock) or thirsty (with water in reach) enough to get up.
+function needsRefresh(state, v) {
+  if (v.hunger >= HUNGRY_AT && nearestFoodSource(state, v)) return true;
+  return (v.thirst ?? 0) >= THIRSTY_AT && nearestWater(state, v.x, v.z) != null;
 }
 
-// A sick villager lies down until healed; gets up to eat when hungry and food exists.
+function execSleep(state, v) {
+  if (!clock(state).isNight) return DONE;
+  return needsRefresh(state, v) ? DONE : undefined;   // wake up to eat / drink
+}
+
+// A sick villager lies down until healed; gets up to eat or drink when needed.
 function execRest(state, v) {
   if (!v.sick) return DONE;
-  return v.hunger >= HUNGRY_AT && nearestFoodStorage(state, v.x, v.z) ? DONE : undefined;
+  return needsRefresh(state, v) ? DONE : undefined;
+}
+
+function execDrink(state, v, t, dt) {
+  if (countdown(t, dt) !== DONE) return undefined;
+  v.thirst = 0;
+  return DONE;
 }
 
 const EXEC = {
@@ -438,20 +475,42 @@ const EXEC = {
   eat: execEat,
   staff: execStaff,
   sleep: execSleep,
+  drink: execDrink,
+  buy: execBuy,
 };
 
+// Finishing one of these earns the villager a wage (coins they spend at markets).
+const PAID_TASKS = new Set(['gather', 'produce', 'hunt', 'plant', 'heal', 'staff', 'build', 'deliver', 'supply']);
+
 export function stepVillager(state, v, dt, rand) {
+  const diff = difficultyOf(state).hunger;
   v.age = (v.age ?? 30) + dt / DAY_LENGTH;
-  v.hunger = Math.min(1, v.hunger + HUNGER_PER_SEC * difficultyOf(state).hunger * dt);
-  if (v.hunger >= STARVING_AT && v.homeId != null) {
+  v.hunger = Math.min(1, v.hunger + HUNGER_PER_SEC * diff * dt);
+  const sleepMul = v.role === 'sleeping' ? SLEEP_THIRST_MUL : 1;
+  v.thirst = Math.min(1, (v.thirst ?? 0) + THIRST_PER_SEC * diff * sleepMul * dt);
+  if (v.hunger >= STARVING_AT || v.thirst >= PARCHED_AT) {
     const home = getBuilding(state, v.homeId);
-    if (home) home.starvedToday = true;
+    if (home && v.hunger >= STARVING_AT) home.starvedToday = true;
+    if (home && v.thirst >= PARCHED_AT) home.parchedToday = true;
   }
   if (v.queue.length === 0) planNext(state, v, rand);
   const task = v.queue[0];
   if (!task) return;
   const exec = EXEC[task.kind];
+  const x0 = v.x;
+  const z0 = v.z;
   const result = exec ? exec(state, v, task, dt) : FAIL;
-  if (result === DONE) v.queue.shift();
-  else if (result === FAIL) failVillager(state, v);
+  exert(v, Math.hypot(v.x - x0, v.z - z0), diff);
+  if (result === DONE) {
+    v.queue.shift();
+    if (PAID_TASKS.has(task.kind)) v.coins = (v.coins ?? 0) + WAGE_PER_TASK;
+  } else if (result === FAIL) failVillager(state, v);
+}
+
+// Walking makes villagers hungry and thirsty sooner (more so under a load).
+function exert(v, metres, diff) {
+  if (!(metres > 0)) return;
+  const m = metres * diff * (v.carry ? CARRY_EXERTION_MUL : 1);
+  v.thirst = Math.min(1, v.thirst + WALK_THIRST_PER_M * m);
+  v.hunger = Math.min(1, v.hunger + WALK_HUNGER_PER_M * m);
 }
