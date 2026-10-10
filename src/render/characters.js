@@ -62,12 +62,21 @@ function merge(list) {
   return out;
 }
 
+// Tessellation scales with size: big curved parts stay smooth, tiny details stay cheap.
+const segs = (r, lo = 6, hi = 16) => Math.max(lo, Math.min(hi, Math.round(r * 100)));
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
-const cyl = (rt, rb, h, seg = 8) => new THREE.CylinderGeometry(rt, rb, h, seg);
-const sph = (r, w = 8, h = 6) => new THREE.SphereGeometry(r, w, h);
-const halfSph = (r, w = 10, h = 5) => new THREE.SphereGeometry(r, w, h, 0, Math.PI * 2, 0, Math.PI / 2);
-const cone = (r, h, seg = 8) => new THREE.ConeGeometry(r, h, seg);
-const torus = (r, t, seg = 10) => new THREE.TorusGeometry(r, t, 4, seg);
+const cyl = (rt, rb, h) => new THREE.CylinderGeometry(rt, rb, h, segs(Math.max(rt, rb), 8, 16));
+const sph = (r) => new THREE.SphereGeometry(r, segs(r, 6, 16), segs(r, 5, 11));
+const halfSph = (r) => new THREE.SphereGeometry(r, segs(r, 10, 16), 6, 0, Math.PI * 2, 0, Math.PI / 2);
+const cone = (r, h) => new THREE.ConeGeometry(r, h, segs(r, 6, 14));
+const torus = (r, t) => new THREE.TorusGeometry(r, t, 5, segs(r * 1.2, 10, 24));
+const capsule = (r, len) => new THREE.CapsuleGeometry(r, len, 3, segs(r * 1.3, 6, 10));
+// Curved sheet in front of the body: open cylinder arc of `span` radians centred on +Z.
+const arc = (rt, rb, h, span) => new THREE.CylinderGeometry(rt, rb, h, 14, 1, true, -span / 2, span);
+// Rounded box: a sphere squashed into the box's proportions.
+const rbox = (w, h, d) => new THREE.SphereGeometry(0.5, 10, 7).scale(w, h, d);
+// Body of revolution from [radius, y] pairs (bottom to top).
+const lathe = (pts, seg = 16) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
 
 // ---------------------------------------------------------------- looks (face/hair/body variation)
 
@@ -84,43 +93,49 @@ export const LOOKS = [
 
 function leg(o) {
   const l = [];
-  add(l, cyl(0.085, 0.075, 0.5, 7), o.trousers, 0, -0.27, 0);
-  add(l, cyl(0.09, 0.08, 0.16, 7), o.bootTop ?? BOOT, 0, -0.6, 0);
-  add(l, box(0.15, 0.1, 0.26), o.boot ?? BOOT, 0, -0.71, 0.04);
+  add(l, capsule(0.082, 0.4), o.trousers, 0, -0.29, 0);                          // whole leg, rounded knee/hip
+  add(l, cyl(0.088, 0.082, 0.17), o.bootTop ?? BOOT, 0, -0.6, 0);               // boot shaft
+  add(l, sph(0.088), o.bootTop ?? BOOT, 0, -0.52, 0, 0, 0, 0, 1, 0.5, 1);       // rolled boot cuff
+  add(l, capsule(0.065, 0.13), o.boot ?? BOOT, 0, -0.705, 0.045, Math.PI / 2, 0, 0, 1.15, 1, 0.85); // rounded foot
   return merge(l);
 }
 
 function arm(o) {
   const l = [];
-  add(l, sph(0.075, 7, 5), o.sleeve, 0, -0.03, 0, 0, 0, 0, 1, 0.8, 1);
-  add(l, cyl(0.07, 0.06, 0.46, 7), o.sleeve, 0, -0.25, 0);
-  if (o.cuff) add(l, cyl(0.068, 0.068, 0.05, 7), o.cuff, 0, -0.47, 0);
-  add(l, sph(o.glove ? 0.064 : 0.06, 6, 5), o.glove ?? o.skin, 0, -0.54, 0.01, 0, 0, 0, 1, 1.15, 0.9);
+  add(l, sph(0.078), o.sleeve, 0, -0.03, 0, 0, 0, 0, 1, 0.85, 1);              // shoulder
+  add(l, capsule(0.066, 0.4), o.sleeve, 0, -0.25, 0);                           // sleeve
+  if (o.cuff) add(l, torus(0.06, 0.02), o.cuff, 0, -0.46, 0, Math.PI / 2);
+  // mitten hand with a thumb
+  add(l, sph(o.glove ? 0.064 : 0.06), o.glove ?? o.skin, 0, -0.54, 0.01, 0, 0, 0, 0.9, 1.2, 0.95);
+  add(l, sph(0.026), o.glove ?? o.skin, 0.035, -0.51, 0.045);
   return merge(l);
 }
+
+// Tunic silhouette: flared hem, cinched waist, rounded chest and shoulders closing at the neck.
+const TUNIC_SHORT = [[0, 0.56], [0.27, 0.565], [0.268, 0.6], [0.24, 0.72], [0.215, 0.86], [0.212, 0.93],
+  [0.228, 1.06], [0.232, 1.2], [0.215, 1.31], [0.17, 1.39], [0.1, 1.44], [0, 1.455]];
+const TUNIC_LONG = [[0, 0.12], [0.3, 0.125], [0.3, 0.17], [0.27, 0.42], [0.235, 0.72], [0.212, 0.9],
+  [0.228, 1.06], [0.232, 1.2], [0.215, 1.31], [0.17, 1.39], [0.1, 1.44], [0, 1.455]];
 
 function torso(o) {
   const l = [];
   const long = o.robe || o.female;
-  if (long) {
-    // ankle-length dress/robe — legs show only boots beneath
-    add(l, cyl(0.22, o.robe ? 0.33 : 0.31, 0.7, 12), o.skirt ?? o.tunic, 0, 0.47, 0);
-  } else {
-    add(l, cyl(0.21, 0.27, 0.34, 10), o.tunic, 0, 0.73, 0);
-  }
-  add(l, cyl(0.22, 0.21, 0.5, 10), o.tunic, 0, 1.12, 0, 0, 0, 0, 1, 1, 0.82);
-  add(l, cyl(0.12, 0.22, 0.1, 10), o.tunic, 0, 1.4, 0, 0, 0, 0, 1, 1, 0.82);
+  const prof = long ? TUNIC_LONG.map(([r, y]) => [o.robe && y < 0.5 ? r * 1.08 : r, y]) : TUNIC_SHORT;
+  const lowColor = long ? (o.skirt ?? o.tunic) : o.tunic;
+  // two lathes so dresses can have a skirt colour below the waist
+  add(l, lathe(prof.filter(([, y]) => y <= 0.93).concat([[0, 0.93]])), lowColor, 0, 0, 0, 0, 0, 0, 1, 1, 0.84);
+  add(l, lathe([[0, 0.9], [0.214, 0.9]].concat(prof.filter(([, y]) => y > 0.93))), o.tunic, 0, 0, 0, 0, 0, 0, 1, 1, 0.84);
   if (o.belt !== null) {
-    add(l, cyl(0.225, 0.225, 0.07, 10), o.belt ?? 0x4a3320, 0, 0.9, 0, 0, 0, 0, 1, 1, 0.84);
-    if (!o.ropeBelt) add(l, box(0.07, 0.06, 0.03), 0xc9a24a, 0, 0.9, 0.19);
+    add(l, torus(0.215, 0.028), o.belt ?? 0x4a3320, 0, 0.9, 0, Math.PI / 2, 0, 0, 1, 0.84, 1);
+    if (!o.ropeBelt) add(l, rbox(0.075, 0.065, 0.035), 0xc9a24a, 0, 0.9, 0.185);
   }
-  add(l, cyl(0.065, 0.07, 0.08, 7), o.skin, 0, 1.47, 0);
+  add(l, cyl(0.062, 0.07, 0.1), o.skin, 0, 1.47, 0);                            // neck
   if (o.apron) {
-    // apron bib + skirt panel hanging in front
-    add(l, box(0.3, 0.42, 0.03), o.apron, 0, 0.66, 0.205, 0.08);
-    add(l, box(0.24, 0.3, 0.03), o.apron, 0, 1.08, 0.185);
-    add(l, box(0.03, 0.3, 0.02), o.apron, -0.1, 1.33, 0.12, -0.5);
-    add(l, box(0.03, 0.3, 0.02), o.apron, 0.1, 1.33, 0.12, -0.5);
+    // apron: curved panels wrapping the front of the body (open cylinder arcs)
+    add(l, arc(0.245, 0.29, 0.42, 1.5), o.apron, 0, 0.68, 0, 0, 0, 0, 1, 1, 0.86);
+    add(l, arc(0.236, 0.232, 0.3, 1.1), o.apron, 0, 1.09, 0, 0, 0, 0, 1, 1, 0.86);
+    add(l, torus(0.244, 0.012), o.apron, 0, 0.885, 0, Math.PI / 2, 0, 0, 1, 0.86, 1);
+    add(l, torus(0.115, 0.013), o.apron, 0, 1.38, 0.035, Math.PI / 2 - 0.55, 0, 0, 1, 1, 1); // neck strap
   }
   if (o.extraTorso) o.extraTorso(l, o);
   return merge(l);
@@ -129,29 +144,32 @@ function torso(o) {
 function head(o) {
   const l = [];
   const skin = o.skin;
-  add(l, sph(0.15, 10, 8), skin, 0, 0.16, 0, 0, 0, 0, 0.95, 1.06, 0.98);
-  add(l, box(0.045, 0.06, 0.06), skin, 0, 0.14, 0.15);                 // nose
-  add(l, sph(0.035, 5, 4), skin, -0.145, 0.15, 0);                     // ears
-  add(l, sph(0.035, 5, 4), skin, 0.145, 0.15, 0);
-  add(l, box(0.03, 0.03, 0.01), DARK, -0.055, 0.19, 0.142);            // eyes
-  add(l, box(0.03, 0.03, 0.01), DARK, 0.055, 0.19, 0.142);
-  add(l, box(0.07, 0.015, 0.01), 0xa8705a, 0, 0.085, 0.142);           // mouth
-  if (o.female) {
-    add(l, box(0.05, 0.012, 0.01), DARK, -0.055, 0.215, 0.142, 0, 0, 0.15); // lashes/brows
-    add(l, box(0.05, 0.012, 0.01), DARK, 0.055, 0.215, 0.142, 0, 0, -0.15);
-  } else {
-    add(l, box(0.06, 0.018, 0.012), o.hair, -0.055, 0.225, 0.14);       // brows
-    add(l, box(0.06, 0.018, 0.012), o.hair, 0.055, 0.225, 0.14);
-  }
-  if (!o.bald) add(l, halfSph(0.158, 10, 5), o.hair, 0, 0.17, -0.01, -0.25, 0, 0, 1, 1.05, 1.02);
+  add(l, sph(0.15), skin, 0, 0.16, 0, 0, 0, 0, 0.95, 1.06, 0.98);       // skull
+  add(l, sph(0.1), skin, 0, 0.08, 0.045, 0, 0, 0, 1.1, 0.8, 1);         // jaw/cheeks
+  add(l, sph(0.032), skin, 0, 0.14, 0.155, 0, 0, 0, 0.9, 1.15, 1);              // nose
+  add(l, sph(0.034), skin, -0.145, 0.15, 0, 0, 0, 0, 0.6, 1, 0.9);              // ears
+  add(l, sph(0.034), skin, 0.145, 0.15, 0, 0, 0, 0, 0.6, 1, 0.9);
+  add(l, sph(0.018), DARK, -0.055, 0.19, 0.137);                                // eyes
+  add(l, sph(0.018), DARK, 0.055, 0.19, 0.137);
+  add(l, capsule(0.009, 0.05), 0xa8705a, 0, 0.085, 0.14, 0, 0, Math.PI / 2);    // mouth
+  const browC = o.female ? DARK : o.hair;
+  const browT = o.female ? 0.007 : 0.011;
+  add(l, capsule(browT, 0.045), browC, -0.055, 0.222, 0.138, 0, 0, Math.PI / 2 + (o.female ? 0.15 : 0));
+  add(l, capsule(browT, 0.045), browC, 0.055, 0.222, 0.138, 0, 0, Math.PI / 2 - (o.female ? 0.15 : 0));
+  if (!o.bald) add(l, halfSph(0.158), o.hair, 0, 0.17, -0.01, -0.25, 0, 0, 1, 1.05, 1.02);
   if (o.female && !o.hideBraid) {
-    // hair down the back + braid
-    add(l, box(0.26, 0.22, 0.08), o.hair, 0, 0.08, -0.11);
-    add(l, sph(0.05, 6, 5), o.hair, 0, -0.06, -0.15);
-    add(l, sph(0.045, 6, 5), o.hair, 0, -0.14, -0.16);
-    add(l, sph(0.04, 6, 5), o.hair, 0, -0.21, -0.165);
+    // hair falling down the back + braid
+    add(l, sph(0.14), o.hair, 0, 0.1, -0.08, 0, 0, 0, 1, 1.15, 0.7);
+    add(l, sph(0.05), o.hair, 0, -0.06, -0.15);
+    add(l, sph(0.045), o.hair, 0, -0.14, -0.16);
+    add(l, sph(0.04), o.hair, 0, -0.21, -0.165);
+    add(l, sph(0.025), 0xb5523a, 0, -0.26, -0.165);                              // ribbon
   }
-  if (o.beard && !o.female) add(l, sph(0.11, 8, 5), o.hair, 0, 0.06, 0.07, 0, 0, 0, 1.05, 0.9, 0.8);
+  if (o.beard && !o.female) {
+    add(l, sph(0.11), o.hair, 0, 0.055, 0.07, 0, 0, 0, 1.05, 0.9, 0.8);
+    add(l, capsule(0.016, 0.07), o.hair, -0.035, 0.105, 0.145, 0, 0, Math.PI / 2 - 0.35); // moustache
+    add(l, capsule(0.016, 0.07), o.hair, 0.035, 0.105, 0.145, 0, 0, Math.PI / 2 + 0.35);
+  }
   if (o.extraHead) o.extraHead(l, o);
   return merge(l);
 }
@@ -169,24 +187,23 @@ function tool(len, headFn, tilt = 1.4) {
 
 const ITEM_BUILDERS = {
   axe: () => tool(0.72, (l, hy, hz, a) => {
-    add(l, box(0.05, 0.07, 0.09), 0x5c6168, 0, hy, hz, a);
-    add(l, box(0.035, 0.2, 0.15), 0x9aa3ab, 0, hy - 0.05, hz + 0.04, a - 0.1);
-    add(l, box(0.036, 0.2, 0.02), 0xd5dade, 0, hy - 0.05, hz + 0.115, a - 0.1);
+    add(l, rbox(0.06, 0.08, 0.1), 0x5c6168, 0, hy, hz, a);
+    add(l, cyl(0.11, 0.11, 0.035).rotateZ(Math.PI / 2).scale(1, 1, 0.75), 0x9aa3ab, 0, hy - 0.05, hz + 0.06, a - 0.1);
   }),
   pickaxe: () => tool(0.75, (l, hy, hz, a) => {
-    add(l, box(0.05, 0.08, 0.08), 0x5c6168, 0, hy, hz, a);
+    add(l, rbox(0.06, 0.09, 0.09), 0x5c6168, 0, hy, hz, a);
     add(l, cone(0.035, 0.26, 5), IRON, 0, hy + 0.15, hz, 0);
     add(l, cone(0.035, 0.26, 5), IRON, 0, hy - 0.15, hz, Math.PI);
   }),
   hammer: () => tool(0.45, (l, hy, hz, a) => {
-    add(l, box(0.08, 0.08, 0.17), 0x6b7078, 0, hy, hz, a);
+    add(l, cyl(0.045, 0.045, 0.17), 0x6b7078, 0, hy, hz, a + Math.PI / 2);
   }),
   sickle: () => tool(0.32, (l, hy, hz) => {
     add(l, torus(0.13, 0.016, 10), 0xb8bec4, 0, hy + 0.02, hz + 0.12, 0, Math.PI / 2, 0, 1, 1, 1);
   }, 1.2),
   saw: () => {
     const l = [];
-    add(l, box(0.05, 0.1, 0.12), WOOD, 0, -0.02, 0.06);
+    add(l, rbox(0.06, 0.11, 0.13), WOOD, 0, -0.02, 0.06);
     add(l, box(0.012, 0.13, 0.62), 0xb8bec4, 0, -0.06, 0.42);
     return merge(l);
   },
@@ -204,15 +221,15 @@ const ITEM_BUILDERS = {
   loaf: () => {
     const l = [];
     add(l, sph(0.09, 8, 5), 0xc48a3e, 0, -0.04, 0.08, 0, 0, 0, 1.5, 0.75, 1);
-    add(l, box(0.02, 0.02, 0.1), 0xe8c88a, -0.05, 0.02, 0.08);
-    add(l, box(0.02, 0.02, 0.1), 0xe8c88a, 0.05, 0.02, 0.08);
+    add(l, capsule(0.012, 0.08), 0xe8c88a, -0.05, 0.02, 0.08, Math.PI / 2);
+    add(l, capsule(0.012, 0.08), 0xe8c88a, 0.05, 0.02, 0.08, Math.PI / 2);
     return merge(l);
   },
   book: () => {
     const l = [];
     add(l, box(0.05, 0.22, 0.17), 0x6a1e22, 0, -0.06, 0.08);
     add(l, box(0.04, 0.2, 0.15), 0xefe3c2, 0.008, -0.06, 0.08);
-    add(l, box(0.052, 0.04, 0.04), 0xc9a24a, 0, -0.06, 0.15);
+    add(l, sph(0.022), 0xc9a24a, 0.02, -0.06, 0.16);
     return merge(l);
   },
   tankard: () => {
@@ -240,14 +257,15 @@ const CARRY_BUILDERS = {
   },
   planks: () => {
     const l = [];
-    add(l, box(0.66, 0.04, 0.16), 0xc49a62, 0, -0.03, 0);
-    add(l, box(0.66, 0.04, 0.16), 0xb48a52, 0, 0.015, 0, 0, 0.06, 0);
-    add(l, box(0.66, 0.04, 0.16), 0xc49a62, 0, 0.06, 0, 0, -0.04, 0);
+    add(l, rbox(0.7, 0.05, 0.17), 0xc49a62, 0, -0.03, 0);
+    add(l, rbox(0.7, 0.05, 0.17), 0xb48a52, 0, 0.015, 0, 0, 0.06, 0);
+    add(l, rbox(0.7, 0.05, 0.17), 0xc49a62, 0, 0.06, 0, 0, -0.04, 0);
     return merge(l);
   },
   stone: () => {
     const l = [];
-    add(l, box(0.3, 0.2, 0.22), 0x9a9890, 0, 0, 0, 0.05, 0.1, 0.03);
+    add(l, rbox(0.32, 0.22, 0.24), 0x9a9890, 0, 0, 0, 0.05, 0.1, 0.03);
+    add(l, rbox(0.14, 0.1, 0.12), 0xa8a69e, 0.08, 0.08, 0.02, 0.3, 0.2, 0);
     return merge(l);
   },
   berries: () => ITEM_BUILDERS.basket().translate(0, 0.16, -0.04),
@@ -290,8 +308,8 @@ export const ROLES = {
       add(l, cone(0.045, 0.24, 6), 0x5c3f25, 0, 0.12, -0.24, -2.5);
     },
     extraTorso(l) {
-      add(l, box(0.05, 0.62, 0.03), 0x3a2716, 0, 1.12, 0.17, 0, 0, 0.65);
-      add(l, box(0.05, 0.62, 0.03), 0x3a2716, 0, 1.12, -0.17, 0, 0, -0.65);
+      // leather baldric looping diagonally around the chest
+      add(l, torus(0.235, 0.02), 0x3a2716, 0, 1.13, 0, Math.PI / 2, 0.62, 0, 1, 0.86, 1);
     },
   },
   forager: {
@@ -341,7 +359,7 @@ export const ROLES = {
     },
     extraTorso(l) {
       // tool pouch on the belt
-      add(l, box(0.1, 0.12, 0.06), 0x5c3f25, 0.17, 0.82, 0.12, 0, 0.5);
+      add(l, rbox(0.11, 0.13, 0.07), 0x5c3f25, 0.17, 0.82, 0.12, 0, 0.5);
     },
   },
   sawyer: {
@@ -429,7 +447,7 @@ export function buildCarry(res) {
 
 let previewMat = null;
 export function characterMaterial() {
-  if (!previewMat) previewMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  if (!previewMat) previewMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   return previewMat;
 }
 
