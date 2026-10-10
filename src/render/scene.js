@@ -52,6 +52,9 @@ export function createScene(canvas) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Filmic tone mapping gives the warm, painterly look the textured models are authored for.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.95;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x8fc4ee);

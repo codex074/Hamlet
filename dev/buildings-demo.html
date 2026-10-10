@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hamlet buildings gallery</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #9cc7e8; overflow: hidden; font-family: -apple-system, "Thonburi", sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #labels { position: fixed; inset: 0; pointer-events: none; }
+  #labels div { position: absolute; transform: translate(-50%, 0); background: #2b2118cc; color: #f3e6c8; padding: 2px 8px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
+  #hint { position: fixed; left: 10px; top: 8px; color: #1f2a33; font-size: 12px; background: #ffffffaa; padding: 3px 8px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="labels"></div>
+<div id="hint">drag: orbit · shift-drag / right-drag: pan · wheel: zoom · ?focus=house&amp;level=3&amp;seed=2 · ?focus=cathedral&amp;stage=4 · ?focus=site · &amp;night=1 · &amp;rings=0</div>
+<script type="module" src="./buildings-demo.js"></script>
+</body>
+</html>

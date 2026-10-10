@@ -150,17 +150,17 @@ export function createWorldView(scene, terrain) {
 
     const solid = b.built || b.type === 'cathedral';
     if (solid) {
-      const model = makeBuildingModel(b.type, { level: b.level || 1, stage: b.stage || 0 });
+      const model = makeBuildingModel(b.type, { level: b.level || 1, stage: b.stage || 0, seed: b.id });
       group.add(model);
-      const sails = model.getObjectByName('sails');
+      const sails = model.getObjectByName('sails') || model.getObjectByName('sawblade');
       if (sails) group.userData.sails = sails;
     }
     if (isSite) {
-      group.add(makeSiteModel(info ? info.radius : 4));
+      group.add(makeSiteModel(info ? info.radius : 4, b.id));
       let ghost;
-      if (b.type === 'cathedral') ghost = makeBuildingModel('cathedral', { stage: Math.min(4, (b.stage || 0) + 1) });
-      else if (b.type === 'house') ghost = makeBuildingModel('house', { level: Math.min(4, (b.level || 1) + (b.built ? 1 : 0)) });
-      else ghost = makeBuildingModel(b.type);
+      if (b.type === 'cathedral') ghost = makeBuildingModel('cathedral', { stage: Math.min(4, (b.stage || 0) + 1), seed: b.id });
+      else if (b.type === 'house') ghost = makeBuildingModel('house', { level: Math.min(4, (b.level || 1) + (b.built ? 1 : 0)), seed: b.id });
+      else ghost = makeBuildingModel(b.type, { seed: b.id });
       group.userData.ghostMaterials = ghostify(ghost);
       group.add(ghost);
       group.userData.ghost = ghost;
@@ -189,7 +189,7 @@ export function createWorldView(scene, terrain) {
         g.userData.ghost.scale.y = Math.max(0.15, b.progress || 0);
       }
       if (g.userData.sails && b.workers && b.workers.length > 0) {
-        g.userData.sails.rotation.z -= dt * 1.1;
+        g.userData.sails.rotation.z -= dt * (b.type === 'sawmill' ? 6 : 1.1);
       }
     }
     for (const [id, entry] of buildings) {
