@@ -103,6 +103,9 @@ function errorBox() {
   return e;
 }
 
+// Programmatic focus pops the on-screen keyboard on touch devices, covering half the form: skip it there.
+const canAutoFocus = () => !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
 function field(label, input, hint) {
   const row = el('label', 'scr-field');
   row.append(el('span', 'scr-lbl', label), input);
@@ -248,7 +251,7 @@ export function authScreen({ googleClientId = null, notice = '' } = {}) {
     setMode('login');
     if (notice) err.show(notice);
     setCard(card);
-    setTimeout(() => email.focus(), 50);
+    setTimeout(() => { if (canAutoFocus()) email.focus(); }, 50);
 
     if (googleClientId) {
       loadGsi().then((g) => {
@@ -338,7 +341,7 @@ export function usernameScreen({ user }) {
       }
     });
     setCard(card);
-    setTimeout(() => input.focus(), 50);
+    setTimeout(() => { if (canAutoFocus()) input.focus(); }, 50);
     void user;
   });
 }
@@ -458,7 +461,7 @@ export function villageSelectScreen({ user }) {
         },
       });
       setCard(form);
-      setTimeout(() => form.focusFirst(), 50);
+      setTimeout(() => { if (canAutoFocus()) form.focusFirst(); }, 50);
     }
 
     function filledSlot(v, n) {
@@ -562,7 +565,7 @@ export function villageSelectScreen({ user }) {
             e.show(er.message);
           }
         });
-        setTimeout(() => input.focus(), 30);
+        setTimeout(() => { if (canAutoFocus()) input.focus(); }, 30);
       });
     }
 
@@ -579,7 +582,7 @@ export function villageSelectScreen({ user }) {
       }
       if (focusSel) {
         const f = grid.querySelector(focusSel);
-        if (f) setTimeout(() => f.focus(), 20);
+        if (f) setTimeout(() => { if (canAutoFocus()) f.focus(); }, 20);
       }
     }
 
@@ -637,6 +640,6 @@ export function localWorldScreen() {
       onSubmit: async ({ settings, seed }) => { closeScreens(); resolve({ settings, seed }); },
     });
     setCard(form);
-    setTimeout(() => form.focusFirst(), 50);
+    setTimeout(() => { if (canAutoFocus()) form.focusFirst(); }, 50);
   });
 }

@@ -208,15 +208,28 @@ export function createHUD(root, handlers = {}) {
     if (!topbar.contains(e.target)) for (const c of groupChips) c.classList.remove('open');
   });
   addChip('gold', info('gold').icon, info('gold').name, 'gold');
-  const popChip = addChip('pop', '👥', 'ประชากร');
+  const popChip = addChip('pop', '👥', 'ประชากร', 'pop');
   const popSub = el('span', 'sub', '');
   popChip.chip.appendChild(popSub);
   const sickEl = el('span', 'sick', '');
   sickEl.hidden = true;
   popChip.chip.appendChild(sickEl);
   let popHover = false;
-  popChip.chip.addEventListener('mouseenter', () => { popHover = true; showPopTip(); });
-  popChip.chip.addEventListener('mouseleave', () => { popHover = false; hideTip(); });
+  const isHoverPointer = (e) => !e || e.pointerType === 'mouse' || e.pointerType === 'pen';
+  popChip.chip.addEventListener('pointerenter', (e) => { if (isHoverPointer(e)) { popHover = true; showPopTip(); } });
+  popChip.chip.addEventListener('pointerleave', (e) => { if (isHoverPointer(e)) { popHover = false; hideTip(); } });
+  // touch: tapping the chip toggles the breakdown card (no hover on iPad)
+  let popTapTimer = 0;
+  popChip.chip.addEventListener('click', () => {
+    if (!window.matchMedia('(hover: none)').matches) return;
+    if (tipEl.classList.contains('show')) { hideTip(); clearTimeout(popTapTimer); return; }
+    showPopTip();
+    clearTimeout(popTapTimer);
+    popTapTimer = setTimeout(hideTip, 4500);
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (popTapTimer && !popChip.chip.contains(e.target)) { clearTimeout(popTapTimer); popTapTimer = 0; hideTip(); }
+  }, true);
   addChip('happy', '😊', 'ความสุขเฉลี่ย');
   const terrChip = addChip('terr', '🗺️', 'ดินแดนที่เป็นของคุณ / ทั้งหมด (คลิกเพื่อเปิดมุมมองดินแดน)', 'terr');
   terrChip.chip.hidden = true;
@@ -238,6 +251,36 @@ export function createHUD(root, handlers = {}) {
     tipEl.style.top = `${top}px`;
   }
   function hideTip() { tipEl.classList.remove('show'); }
+
+  // Tooltip on a build-bar control: hover for mouse/pen, 450 ms long-press for touch (released -> hides).
+  // A long-press swallows the click that follows it, so only a short tap selects the tool.
+  const LONG_PRESS_MS = 450;
+  function bindTip(node, getHtml) {
+    let timer = 0, sx = 0, sy = 0;
+    node._lp = false;
+    node.addEventListener('pointerenter', (e) => { if (isHoverPointer(e)) showTip(getHtml(), node); });
+    node.addEventListener('pointerleave', (e) => { if (isHoverPointer(e)) hideTip(); });
+    node.addEventListener('pointerdown', (e) => {
+      if (isHoverPointer(e)) return;
+      clearTimeout(timer);
+      node._lp = false;
+      sx = e.clientX; sy = e.clientY;
+      timer = setTimeout(() => { timer = 0; node._lp = true; showTip(getHtml(), node); }, LONG_PRESS_MS);
+    });
+    node.addEventListener('pointermove', (e) => {
+      if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) { clearTimeout(timer); timer = 0; }
+    });
+    const end = () => { clearTimeout(timer); timer = 0; if (node._lp) hideTip(); };
+    node.addEventListener('pointerup', end);
+    node.addEventListener('pointercancel', () => { end(); node._lp = false; });
+    node.addEventListener('contextmenu', (e) => { if (!isHoverPointer(e) || node._lp) e.preventDefault(); });
+  }
+  // true (once) when the click just fired belongs to a long-press that already showed the tooltip
+  function lpConsumed(node) {
+    if (!node._lp) return false;
+    node._lp = false;
+    return true;
+  }
 
   // Population breakdown (families spec §10); counts a missing field as unknown.
   function popTipHtml() {
@@ -288,11 +331,11 @@ export function createHUD(root, handlers = {}) {
     const rec = { btn, id: def.id, tab: def.tab, type: def.type, costs, locked: false, unlockPop: def.unlockPop };
     toolButtons.push(rec);
     btn.addEventListener('click', () => {
+      if (lpConsumed(btn)) return;
       if (rec.locked) { toast(`ปลดล็อกเมื่อประชากร ${def.unlockPop}`); return; }
       toggleTool(def.tool, def.id);
     });
-    btn.addEventListener('mouseenter', () => showTip(def.tip(rec), btn));
-    btn.addEventListener('mouseleave', hideTip);
+    bindTip(btn, () => def.tip(rec));
     return rec;
   }
 
@@ -352,23 +395,21 @@ export function createHUD(root, handlers = {}) {
   const demoTab = makeTab('demolish', '🔨 รื้อถอน');
   demoTab.classList.add('demolish');
   demoTab.dataset.tool = 'demolish';
-  demoTab.addEventListener('click', () => toggleTool({ kind: 'demolish' }, 'demolish'));
-  demoTab.addEventListener('mouseenter', () => showTip('<b>รื้อถอน</b><br>คลิกอาคารหรือโซนเพื่อรื้อ คืนวัสดุ 50%', demoTab));
-  demoTab.addEventListener('mouseleave', hideTip);
+  demoTab.addEventListener('click', () => { if (lpConsumed(demoTab)) return; toggleTool({ kind: 'demolish' }, 'demolish'); });
+  bindTip(demoTab, () => '<b>รื้อถอน</b><br>แตะอาคารหรือโซนเพื่อรื้อ คืนวัสดุ 50%');
 
   // 🗺️ ดินแดน: territory view (plot grid, buy plots). Hidden until the sim exposes territories.
   const terrTab = makeTab('territory', '🗺️ ดินแดน');
   terrTab.classList.add('terr');
   terrTab.dataset.tool = 'territory';
   terrTab.hidden = true;
-  terrTab.addEventListener('click', () => { hideTip(); toggleTool({ kind: 'territory' }, 'territory'); });
-  terrTab.addEventListener('mouseenter', () => {
+  terrTab.addEventListener('click', () => { if (lpConsumed(terrTab)) return; hideTip(); toggleTool({ kind: 'territory' }, 'territory'); });
+  bindTip(terrTab, () => {
     const st = lastState;
     let price = '';
     try { if (st && typeof sim.plotPrice === 'function') price = `<br><span class="dim">แปลงถัดไปราคา 🪙 ${sim.plotPrice(st)}</span>`; } catch (e) { /* ignore */ }
-    showTip(`<b>ดินแดน</b><br>แสดงเส้นแบ่งแปลง คลิกแปลงที่ติดกับดินแดนของคุณเพื่อซื้อ — วางอาคารและเก็บทรัพยากรได้เฉพาะในดินแดนของคุณ${price}`, terrTab);
+    return `<b>ดินแดน</b><br>แสดงเส้นแบ่งแปลง แตะแปลงที่ติดกับดินแดนของคุณเพื่อซื้อ — วางอาคารและเก็บทรัพยากรได้เฉพาะในดินแดนของคุณ${price}`;
   });
-  terrTab.addEventListener('mouseleave', hideTip);
 
   function renderTabs() {
     for (const t of TAB_DEFS) {
@@ -491,7 +532,46 @@ export function createHUD(root, handlers = {}) {
   let infoBodyHtml = '';
   let infoVid = null;   // villager id when the panel shows a villager instead of a building
 
+  // body.info-open lets the CSS move the event log / FPS counter out of the way of the bottom sheet
+  function setInfoOpen(open) { document.body.classList.toggle('info-open', !!open); }
+
+  // Narrow / portrait windows show the info panel as a bottom sheet: drag the handle (head) down to dismiss.
+  const sheetMq = window.matchMedia('(max-width: 900px), (orientation: portrait)');
+  {
+    let drag = null;
+    infoEl.addEventListener('pointerdown', (e) => {
+      if (!sheetMq.matches || e.pointerType === 'mouse') return;
+      const head = e.target.closest('.info-head, .info-grip');
+      if (!head || e.target.closest('button')) return;
+      drag = { id: e.pointerId, y0: e.clientY, dy: 0 };
+      infoEl.style.transition = 'none';
+      try { head.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    });
+    infoEl.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.dy = Math.max(0, e.clientY - drag.y0);
+      infoEl.style.transform = `translateY(${drag.dy}px)`;
+    });
+    const endDrag = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dy = drag.dy;
+      drag = null;
+      infoEl.style.transition = '';
+      infoEl.style.transform = '';
+      if (dy > 70 && e.type === 'pointerup') { closeInfoPanel(); call('closeInfo'); }
+    };
+    infoEl.addEventListener('pointerup', endDrag);
+    infoEl.addEventListener('pointercancel', endDrag);
+  }
+
+  // Publish the build bar's height so bottom-anchored UI (info sheet, event log) can stack above it.
+  if (typeof ResizeObserver === 'function') {
+    const rootStyle = document.documentElement.style;
+    new ResizeObserver(() => rootStyle.setProperty('--bb-h', `${Math.ceil(buildbar.getBoundingClientRect().height)}px`)).observe(buildbar);
+  }
+
   function closeInfoPanel() {
+    setInfoOpen(false);
     infoId = null;
     infoVid = null;
     infoSig = '';
@@ -513,6 +593,7 @@ export function createHUD(root, handlers = {}) {
   function buildInfoShell(b) {
     const def = BUILDINGS[b.type];
     infoEl.textContent = '';
+    infoEl.appendChild(el('div', 'info-grip'));
     const head = el('div', 'info-head');
     head.appendChild(el('span', 'info-title', def.name));
     const x = el('button', 'x', '✕');
@@ -540,6 +621,8 @@ export function createHUD(root, handlers = {}) {
     infoEl.appendChild(infoBodyEl);
     infoBodyHtml = '';
     infoEl.hidden = false;
+    infoEl.scrollTop = 0;
+    setInfoOpen(true);
   }
 
   function adjustWorkers(delta) {
@@ -713,6 +796,7 @@ export function createHUD(root, handlers = {}) {
 
   function buildVillagerShell(vi) {
     infoEl.textContent = '';
+    infoEl.appendChild(el('div', 'info-grip'));
     const head = el('div', 'info-head');
     head.appendChild(el('span', 'info-title', vi.fullName || vi.name || 'ชาวบ้าน'));
     const x = el('button', 'x', '✕');
@@ -727,6 +811,8 @@ export function createHUD(root, handlers = {}) {
     infoEl.appendChild(infoBodyEl);
     infoBodyHtml = '';
     infoEl.hidden = false;
+    infoEl.scrollTop = 0;
+    setInfoOpen(true);
   }
 
   function renderVillager(state) {

@@ -11,6 +11,7 @@ import { heightAt } from './terrain.js';
 import { SPAWN } from './config.js';
 import { createHUD } from './ui/hud.js';
 import { createTools } from './ui/tools.js';
+import { createTouchControls } from './ui/touch.js';
 import { GUIDE } from './ui/guide.js';
 import { createSettingsPanel } from './ui/settings.js';
 import { localWorldScreen } from './ui/screens.js';
@@ -180,6 +181,7 @@ function boot(session) {
     getState: () => state,
     sim, hud, terrainHeight, pickGround, worldView, cameraController,
   });
+  createTouchControls({ root: document.body, tools });
   hud.setSpeedDisplay(speed);
   settingsPanel = createSettingsPanel({
     root: document.body,
@@ -195,9 +197,11 @@ function boot(session) {
     return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
   }
 
+  // Camera gestures (pan / pinch / twist / tilt) and touch taps are handled by the camera controller on pointer events;
+  // these listeners are the mouse path (hover ghost, click to place / select).
   canvas.addEventListener('pointermove', (e) => tools.onPointerMove(e));
   canvas.addEventListener('pointerdown', (e) => tools.onPointerDown(e));
-  canvas.addEventListener('pointerleave', () => tools.onPointerLeave());
+  canvas.addEventListener('pointerleave', (e) => tools.onPointerLeave(e));
   window.addEventListener('pointerup', (e) => tools.onPointerUp(e));
   // capture phase so Shift+wheel rotation preempts the camera's zoom handler
   window.addEventListener('wheel', (e) => {

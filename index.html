@@ -2,9 +2,27 @@
 <html lang="th">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Hamlet — หมู่บ้านยุคกลาง</title>
+<meta name="description" content="เกมสร้างหมู่บ้านยุคกลางแบบ 3D — สร้างอิสระ สืบสานตระกูล">
+<meta name="theme-color" content="#2b2118">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hamlet">
 <link rel="stylesheet" href="src/ui/style.css">
+<script>
+  // iOS Safari only applies :active styles when some touchstart listener exists.
+  document.addEventListener('touchstart', () => {}, { passive: true });
+  // Installable + offline after the first visit. The worker is network-first for game code, so updates still arrive.
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  }
+</script>
 </head>
 <body>
 <canvas id="game" tabindex="0"></canvas>

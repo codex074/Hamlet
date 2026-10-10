@@ -5,6 +5,9 @@ import { makeBuildingModel } from '../render/models.js';
 const ROT_STEP = Math.PI / 12; // 15 degrees
 const EVAL_INTERVAL = 0.05;    // seconds between re-evaluations while the camera moves
 const CLICK_SLOP = 5;          // px
+const GHOST_GRAB_R = 3.5;      // m: a touch this close to the build ghost drags it instead of panning
+const ROT_RATE = 2.0;          // rad/s while the rotate button is held on touch
+const isMousePointer = (e) => !e || !e.pointerType || e.pointerType === 'mouse';
 
 export function toolId(tool) {
   if (!tool) return null;
@@ -45,6 +48,14 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
 
   // click tracking
   let downInfo = null;     // { x, y, button }
+
+  // touch
+  const coarseMq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  let touchMode = !!(coarseMq && coarseMq.matches);   // last input was touch / pen (or the device is touch-first)
+  let touchAnchor = null;  // {x, z}: where the build ghost sits on touch devices (it does not follow a hover)
+  let ghostGrab = null;    // {dx, dz}: finger-to-ghost offset while dragging the ghost
+  let lastCheck = null;    // result of the latest sim.canPlace for the ghost
+  let touchUI = null;      // on-screen controls (ui/touch.js)
 
   const COL_OK = new THREE.Color(0x66e070);
   const COL_BAD = new THREE.Color(0xf05a4a);
@@ -260,8 +271,12 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
   }
 
   function select(tool) {
+    const keepSpot = touchAnchor && current && current.kind === 'build' && tool && tool.kind === 'build';
     cleanupCurrent();
     current = tool || null;
+    lastCheck = null;
+    ghostGrab = null;
+    if (!keepSpot) touchAnchor = null;
     cameraController.setPanWithLeftMouse(!current || current.kind === 'territory');
     if (current && current.kind === 'territory' && !territoryOk()) {
       current = null;
@@ -272,6 +287,12 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
       if (selectedId != null || selectedVid != null) clearSelection();
       if (current.kind === 'build') {
         createGhost(current.type);
+        if (touchMode && !touchAnchor) {
+          // no hover on touch: start with the ghost in the middle of the view; tap or drag to move it
+          const rect = canvas.getBoundingClientRect();
+          updateNdc(rect.left + rect.width / 2, rect.top + rect.height * 0.45);
+          touchAnchor = pickGround(ndc) || null;
+        }
         const r = buildRingRadius(current.type);
         if (r > 0) {
           buildRing = makeRing(0.55);
@@ -289,19 +310,23 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
 
   // ---------- per-tool evaluation (pointer or camera moved) ----------
   function evaluate() {
-    if (!current || !pointer.has) return;
+    if (!current) return;
+    if (!pointer.has && !(touchAnchor && current.kind === 'build')) return;
     const state = getState();
     if (current.kind === 'build') {
-      if (!ground || !ghost) {
+      const spot = touchAnchor || ground;
+      if (!spot || !ghost) {
         if (ghost) ghost.visible = false;
         if (buildRing) buildRing.hide();
+        lastCheck = null;
         return;
       }
-      const { x, z } = ground;
+      const { x, z } = spot;
       ghost.visible = true;
       ghost.position.set(x, terrainHeight(x, z), z);
       ghost.rotation.y = rot;
       const res = sim.canPlace(state, current.type, x, z, rot);
+      lastCheck = res || null;
       tintGhost(!!(res && res.ok));
       if (buildRing) {
         const r = buildRingRadius(current.type);
@@ -340,8 +365,60 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     }
   }
 
+  // ---------- actions shared by mouse and touch ----------
+  function tryPlace(x, z) {
+    const state = getState();
+    const check = sim.canPlace(state, current.type, x, z, rot);
+    if (!check || !check.ok) {
+      hud.toast((check && check.reason) || 'วางตรงนี้ไม่ได้');
+      return false;
+    }
+    const id = sim.placeBuilding(state, current.type, x, z, rot);
+    if (id == null) hud.toast('วางอาคารไม่สำเร็จ (วัสดุหรือทองไม่พอ)');
+    evaluate();
+    return id != null;
+  }
+
+  // Demolish whatever is at the pointer (building under it, else the ground point). Needs setPointer() first.
+  function demolishAtPointer() {
+    const state = getState();
+    let target = null;
+    const id = pickBuildingId();
+    if (id != null) {
+      const b = state.buildings.find((bb) => bb.id === id);
+      if (b) target = { x: b.x, z: b.z };
+    }
+    if (!target && ground) target = ground;
+    if (!target) return;
+    const ok = sim.removeAt(state, target.x, target.z);
+    hud.toast(ok ? 'รื้อถอนแล้ว (คืนวัสดุ 50%)' : 'ไม่มีอะไรให้รื้อตรงนี้');
+    hoverId = null;
+    worldView.setHighlight(null);
+    evaluate();
+  }
+
+  // No-tool click / tap: select the villager or building under the pointer, else deselect. Needs setPointer() first.
+  // `fuzzy` (touch) retries with a few nearby rays, because a fingertip is much bigger than a mouse pointer.
+  const FUZZ = [[0, 0], [16, 0], [-16, 0], [0, 16], [0, -16]];
+  function selectAtPointer(fuzzy) {
+    const state = getState();
+    const { cx, cy } = pointer;
+    for (const [ox, oy] of (fuzzy ? FUZZ : FUZZ.slice(0, 1))) {
+      updateNdc(cx + ox, cy + oy);
+      const vid = pickVillagerId(state);
+      if (vid != null) { selectVillager(vid); return true; }
+      const id = worldView.pickBuilding(raycaster);
+      const b = id == null ? null : state.buildings.find((bb) => bb.id === id);
+      if (b) { selectBuilding(b.id); return true; }
+    }
+    if (selectedId != null || selectedVid != null) clearSelection();
+    return false;
+  }
+
   // ---------- events ----------
   function onPointerMove(e) {
+    if (!isMousePointer(e)) return;   // touch / pen go through the camera's gesture recogniser (see touchHandler)
+    if (touchAnchor) touchAnchor = null;
     setPointer(e);
     if (downInfo && downInfo.button === 0 && !downInfo.moved) {
       if (Math.hypot(e.clientX - downInfo.x, e.clientY - downInfo.y) >= CLICK_SLOP) downInfo.moved = true;
@@ -353,7 +430,8 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     evaluate();
   }
 
-  function onPointerLeave() {
+  function onPointerLeave(e) {
+    if (e && !isMousePointer(e)) return;
     if (painting) return;
     pointer.has = false;
     ground = null;
@@ -364,6 +442,7 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
   }
 
   function onPointerDown(e) {
+    if (!isMousePointer(e)) return;
     setPointer(e);
     downInfo = { x: e.clientX, y: e.clientY, button: e.button, moved: false };
     if (e.button !== 0 || !current) return;
@@ -371,38 +450,19 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
 
     if (current.kind === 'build') {
       if (!ground) return;
-      const { x, z } = ground;
-      const check = sim.canPlace(state, current.type, x, z, rot);
-      if (!check || !check.ok) {
-        hud.toast((check && check.reason) || 'วางตรงนี้ไม่ได้');
-        return;
-      }
-      const id = sim.placeBuilding(state, current.type, x, z, rot);
-      if (id == null) hud.toast('วางอาคารไม่สำเร็จ (วัสดุหรือทองไม่พอ)');
-      evaluate();
+      tryPlace(ground.x, ground.z);
     } else if (current.kind === 'zone') {
       if (!ground) return;
       painting = true;
       lastPaint = null;
       paintStep(ground.x, ground.z, true);
     } else if (current.kind === 'demolish') {
-      let target = null;
-      const id = pickBuildingId();
-      if (id != null) {
-        const b = state.buildings.find((bb) => bb.id === id);
-        if (b) target = { x: b.x, z: b.z };
-      }
-      if (!target && ground) target = ground;
-      if (!target) return;
-      const ok = sim.removeAt(state, target.x, target.z);
-      hud.toast(ok ? 'รื้อถอนแล้ว (คืนวัสดุ 50%)' : 'ไม่มีอะไรให้รื้อตรงนี้');
-      hoverId = null;
-      worldView.setHighlight(null);
-      evaluate();
+      demolishAtPointer();
     }
   }
 
   function onPointerUp(e) {
+    if (!isMousePointer(e)) return;
     const d = downInfo;
     downInfo = null;
     if (e.button === 0) painting = false;
@@ -421,17 +481,13 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     }
     if (e.button === 0 && !current && isClick) {
       setPointer(e);
-      const state = getState();
-      const vid = pickVillagerId(state);
-      if (vid != null) { selectVillager(vid); return; }
-      const id = worldView.pickBuilding(raycaster);
-      const b = id == null ? null : state.buildings.find((bb) => bb.id === id);
-      if (b) {
-        selectBuilding(b.id);
-      } else if (selectedId != null || selectedVid != null) {
-        clearSelection();
-      }
+      selectAtPointer(false);
     }
+  }
+
+  function adjustBrush(dir) {
+    brushR = Math.max(ZONE_BRUSH.min, Math.min(ZONE_BRUSH.max, brushR + dir));
+    evaluate();
   }
 
   function onKey(e) {
@@ -450,9 +506,7 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
       case 'BracketLeft':
       case 'BracketRight':
         if (current && current.kind === 'zone') {
-          const dir = e.code === 'BracketRight' ? 1 : -1;
-          brushR = Math.max(ZONE_BRUSH.min, Math.min(ZONE_BRUSH.max, brushR + dir));
-          evaluate();
+          adjustBrush(e.code === 'BracketRight' ? 1 : -1);
           return true;
         }
         return false;
@@ -471,6 +525,128 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     return true;
   }
 
+  // ---------- touch ----------
+  function setTouchMode(on) {
+    if (on === touchMode) return;
+    touchMode = on;
+    if (!on) touchAnchor = null;
+  }
+  if (typeof window !== 'undefined') {
+    // capture phase so the mode is right before any handler (camera, HUD button) reacts to the same event
+    window.addEventListener('pointerdown', (e) => { if (e.pointerType) setTouchMode(e.pointerType !== 'mouse'); }, true);
+    window.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') setTouchMode(false); }, true);
+  }
+
+  // After a touch interaction there is no pointer any more: hide hover feedback (the build ghost keeps its spot).
+  function releasePointer() {
+    pointer.has = false;
+    ground = null;
+    if (zoneRing) zoneRing.hide();
+    if (hoverId != null) { hoverId = null; worldView.setHighlight(null); }
+  }
+
+  const fakeEvent = (x, y) => ({ clientX: x, clientY: y });
+
+  const touchHandler = {
+    // Decide at touch-down whether a one-finger drag belongs to a tool instead of panning the camera.
+    claim(x, y) {
+      if (!current) return false;
+      if (current.kind === 'zone') return true;
+      if (current.kind === 'build' && touchAnchor && ghost && ghost.visible) {
+        updateNdc(x, y);
+        if (raycaster.intersectObject(ghost, true).length > 0) return true;
+        const g = pickGround(ndc);
+        return !!g && Math.hypot(g.x - touchAnchor.x, g.z - touchAnchor.z) <= GHOST_GRAB_R;
+      }
+      return false;
+    },
+    claimBegin(x, y) {
+      if (!current) return;
+      setPointer(fakeEvent(x, y));
+      if (current.kind === 'zone') {
+        painting = true;
+        lastPaint = null;
+        if (ground) paintStep(ground.x, ground.z, true);
+        evaluate();
+      } else if (current.kind === 'build' && touchAnchor) {
+        ghostGrab = ground ? { dx: touchAnchor.x - ground.x, dz: touchAnchor.z - ground.z } : { dx: 0, dz: 0 };
+      }
+    },
+    claimMove(x, y) {
+      if (!current) return;
+      setPointer(fakeEvent(x, y));
+      if (current.kind === 'zone') {
+        evaluate();
+      } else if (current.kind === 'build' && touchAnchor && ghostGrab && ground) {
+        touchAnchor = { x: ground.x + ghostGrab.dx, z: ground.z + ghostGrab.dz };
+        evaluate();
+      }
+    },
+    claimEnd() {
+      painting = false;
+      lastPaint = null;
+      ghostGrab = null;
+      releasePointer();
+    },
+    tap(x, y) {
+      setPointer(fakeEvent(x, y));
+      if (!current) {
+        selectAtPointer(true);
+      } else if (current.kind === 'build') {
+        if (ground) { touchAnchor = { x: ground.x, z: ground.z }; evaluate(); }
+      } else if (current.kind === 'demolish') {
+        demolishAtPointer();
+      } else if (current.kind === 'territory') {
+        territoryClick(fakeEvent(x, y));
+      }
+      releasePointer();
+    },
+    longPress(x, y) {
+      if (current) return;
+      setPointer(fakeEvent(x, y));
+      selectAtPointer(true);
+      releasePointer();
+    },
+  };
+  cameraController.setTouchHandler(touchHandler);
+
+  // Snapshot for the on-screen controls (cheap; ui/touch.js diffs it).
+  function touchSnapshot() {
+    const kind = current ? current.kind : null;
+    const def = current && current.kind === 'build' ? BUILDINGS[current.type] : null;
+    return {
+      active: touchMode,
+      kind,
+      name: def ? def.name : '',
+      hasSpot: !!touchAnchor,
+      valid: kind === 'build' && lastCheck ? !!lastCheck.ok : null,
+      reason: kind === 'build' && lastCheck && !lastCheck.ok ? (lastCheck.reason || 'วางตรงนี้ไม่ได้') : '',
+      brush: brushR,
+      brushMin: ZONE_BRUSH.min,
+      brushMax: ZONE_BRUSH.max,
+      selection: selectedId != null || selectedVid != null,
+    };
+  }
+
+  // Actions for the on-screen controls.
+  const touchActions = {
+    rotate(delta) {
+      if (!(current && current.kind === 'build')) return;
+      rot = ((rot + delta) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+      evaluate();
+    },
+    rotateStep(dir) { touchActions.rotate((dir || 1) * ROT_STEP); },
+    rotateRate: ROT_RATE,
+    place() {
+      if (!(current && current.kind === 'build')) return false;
+      if (!touchAnchor) { hud.toast('แตะบนแผนที่เพื่อเลือกที่วาง'); return false; }
+      return tryPlace(touchAnchor.x, touchAnchor.z);
+    },
+    brush(dir) { if (current && current.kind === 'zone') adjustBrush(dir); },
+    cancel() { return onKey({ code: 'Escape' }); },   // same as Esc: leave the tool, else close the info panel
+    done() { select(null); },
+  };
+
   function update(dt) {
     const state = getState();
     if (current && current.kind === 'territory' && signature(state) !== terrSig) setTerritory(true);
@@ -483,6 +659,13 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
       selectedVid = null;
       worldView.setHighlightVillager?.(null);
       hud.showInfo(null, state);
+    }
+    if (touchUI) touchUI.sync(touchSnapshot());
+    if (current && current.kind === 'build' && touchAnchor) {
+      // keep the ghost's colour in step with gold / materials / terrain changes (it stays put in the world)
+      evalTimer += dt;
+      if (evalTimer >= EVAL_INTERVAL * 4) { evalTimer = 0; evaluate(); }
+      return;
     }
     if (!current || !pointer.has) return;
     evalTimer += dt;
@@ -506,6 +689,9 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     onPointerLeave,
     onKey,
     onWheel,
+    touch: touchActions,
+    get touchMode() { return touchMode; },
+    setTouchUI(ui) { touchUI = ui || null; if (touchUI) touchUI.sync(touchSnapshot()); },
     selectBuilding,
     selectVillager,
     deselect() {
