@@ -1,5 +1,5 @@
 // Gallery of every building model. Serve the project root, open /dev/buildings-demo.html
-//   ?focus=<type>[&level=1..4][&stage=0..4][&seed=n]   close-up of one model ("site" = construction site)
+//   ?focus=<type>[&level=1..5][&stage=0..4][&seed=n]   close-up of one model ("site" = construction site)
 //   &night=1  window glow on, moonlit        &rings=0  hide the config footprint rings
 import * as THREE from '../vendor/three.module.js';
 import { BUILDINGS } from '../src/config.js';
@@ -60,6 +60,12 @@ function add(name, group, x, z, radius, rot = 0) {
     ring.position.set(x, 0, z);
     scene.add(ring);
   }
+  const pen = group.userData.pen; // sheep pen: green ring (local -> world, ignoring rotation offsets of the demo)
+  if (pen && q.get('rings') !== '0') {
+    const pts = [];
+    for (let i = 0; i <= 48; i++) pts.push(new THREE.Vector3(pen.x + Math.cos(i / 48 * Math.PI * 2) * pen.r, 0.08, pen.z + Math.sin(i / 48 * Math.PI * 2) * pen.r));
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.7 })));
+  }
   items.push({ name, group, x, z, radius, tris: group.userData.triangles });
   return group;
 }
@@ -80,28 +86,33 @@ if (focus) {
   center.set(0, r * 0.45, 0);
   dist = r * 3.4 + 4;
 } else {
-  // row A: every building type
-  const types = ['townhall', 'storehouse', 'woodcutter', 'forager', 'quarry', 'sawmill', 'farmhouse', 'mill', 'bakery', 'chapel', 'tavern'];
-  let x = 0;
-  for (const t of types) {
-    const r = BUILDINGS[t].radius;
-    x += r + 1.5;
-    add(t, makeBuildingModel(t, { seed: 3 }), x, 0, r);
-    x += r + 1.5;
-  }
-  const rowW = x;
-  // row B: houses, levels 1-4 x 3 seeds
-  for (let l = 1; l <= 4; l++) {
+  // row A: the original building types; row A2: profession buildings
+  const place = (types, z) => {
+    let x = 0;
+    for (const t of types) {
+      const r = BUILDINGS[t].radius;
+      x += r + 1.5;
+      add(t, makeBuildingModel(t, { seed: 3 }), x, z, r);
+      x += r + 1.5;
+    }
+    return x;
+  };
+  const rowW = Math.max(
+    place(['townhall', 'storehouse', 'woodcutter', 'forager', 'quarry', 'sawmill', 'farmhouse', 'mill', 'bakery', 'chapel', 'tavern'], 0),
+    place(['fishery', 'hunter', 'herbalist', 'sheepfarm', 'ironmine', 'weaver', 'blacksmith', 'infirmary', 'market'], 26),
+  );
+  // row B: houses, levels 1-5 x 3 seeds
+  for (let l = 1; l <= 5; l++) {
     for (let s = 0; s < 3; s++) {
-      add(`house L${l} s${s}`, makeBuildingModel('house', { level: l, seed: s * 5 + l }), (l - 1) * 3 * 7.5 + s * 7.5 + 4, 22, 3);
+      add(`house L${l} s${s}`, makeBuildingModel('house', { level: l, seed: s * 5 + l }), (l - 1) * 3 * 8 + s * 8 + 4, 52, 3);
     }
   }
   // row C: cathedral stages
-  for (let s = 0; s <= 4; s++) add(`cathedral ${s}`, makeBuildingModel('cathedral', { stage: s }), 14 + s * 27, 62, 11);
-  add('site r4', makeSiteModel(4, 1), 160, 22, 4);
-  add('site r6', makeSiteModel(6, 2), 175, 22, 6);
-  center.set(rowW / 2, 0, 20);
-  dist = 175;
+  for (let s = 0; s <= 4; s++) add(`cathedral ${s}`, makeBuildingModel('cathedral', { stage: s }), 14 + s * 27, 92, 11);
+  add('site r4', makeSiteModel(4, 1), 160, 52, 4);
+  add('site r6', makeSiteModel(6, 2), 175, 52, 6);
+  center.set(rowW / 2, 0, 40);
+  dist = 200;
 }
 
 // orbit camera

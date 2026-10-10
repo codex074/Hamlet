@@ -7,6 +7,7 @@ import {
   SUPPLY_MAX, CLOTH_PER_HOUSE_PER_DAY, HERBS_PER_HEAL, TOOL_SPEED_BONUS, TOOLS_PER_BUILDING_PER_DAY,
   FISH_RADIUS, HUNT_RADIUS, UPGRADE_BUILD_TIME, RESOURCES,
 } from '../config.js';
+import * as CFG from '../config.js';
 
 const icon = (r) => RESOURCE_INFO[r]?.icon || '';
 const name = (r) => RESOURCE_INFO[r]?.name || r;
@@ -39,6 +40,23 @@ function buildingRows(category) {
       <td>${jobText(t, d)}</td><td>${d.unlockPop ? `👥 ${d.unlockPop}` : 'ทันที'}</td></tr>`)
     .join('');
 }
+
+// Family constants live in config.js (added by the sim); fall back to the spec values if one is missing.
+const num = (k, d) => (Number.isFinite(CFG[k]) ? CFG[k] : d);
+const CHILD_AGE = num('CHILD_AGE', 14), ELDER_AGE = num('ELDER_AGE', 55);
+const DEATH_MIN = num('DEATH_AGE_MIN', 70), DEATH_MAX = num('DEATH_AGE_MAX', 85);
+const MARRY_MIN = num('MARRY_MIN', 18), MARRY_MAX = num('MARRY_MAX', 45), MARRY_CHANCE = num('MARRY_CHANCE', 0.35);
+const FERTILE_MIN = num('FERTILE_MIN', 18), FERTILE_MAX = num('FERTILE_MAX', 42);
+const PREG_CHANCE = num('PREGNANCY_CHANCE', 0.3), PREG_DAYS = num('PREGNANCY_DAYS', 2);
+const LEAVE_HOME_AGE = num('LEAVE_HOME_AGE', 18);
+const ELDER_SPEED = num('ELDER_SPEED_MUL', 0.75), CHILD_SPEED = num('CHILD_SPEED_MUL', 0.9);
+const PREGNANT_SPEED = num('PREGNANT_SPEED_MUL', 0.8);
+const LIGHT_FALLBACK = ['chapel', 'tavern', 'market', 'infirmary', 'herbalist', 'weaver', 'bakery', 'forager'];
+const lightTypes = (() => {
+  const flagged = Object.entries(BUILDINGS).filter(([, d]) => d.light).map(([t]) => t);
+  return (flagged.length ? flagged : LIGHT_FALLBACK).filter((t) => BUILDINGS[t]);
+})();
+const lightNames = lightTypes.map((t) => BUILDINGS[t].name).join(' · ');
 
 const mealsPerDay = Math.round(DAY_LENGTH * HUNGER_PER_SEC / HUNGRY_AT * 10) / 10;
 
@@ -165,6 +183,60 @@ export const GUIDE = [
       <h3>คนย้ายออก</h3>
       <p>ถ้าบ้านไหนมีความสุขต่ำกว่า ${pct(LEAVE_HAPPINESS)} ติดกัน ${LEAVE_AFTER_DAYS} วัน จะมีคนย้ายออก 1 คน
       สาเหตุที่พบบ่อยที่สุดคือ<b>อาหารหมด</b></p>`,
+  },
+  {
+    id: 'family', title: '👪 ครอบครัวและอายุ',
+    html: `
+      <p>ชาวบ้านมีชื่อ นามสกุล เพศ และอายุ — <b>1 วันในเกม = 1 ปี</b> ของชีวิตพวกเขา
+      เกิด แต่งงาน มีลูก แก่ และจากไป ทำให้หมู่บ้านเติบโตเป็นรุ่นๆ คลิกชาวบ้านบนแผนที่เพื่อดูครอบครัว
+      หรือคลิกบ้านเพื่อดูสมาชิกในบ้าน</p>
+      <h3>วัยของชีวิต</h3>
+      <table class="gt"><tr><th>วัย</th><th>อายุ</th><th>ทำอะไรได้</th></tr>
+        <tr><td><b>👶 เด็ก</b></td><td>0–${CHILD_AGE - 1} ปี</td><td>ทำงานไม่ได้ วิ่งเล่นแถวบ้าน กินอาหารเท่าผู้ใหญ่ เดินเร็ว ${pct(CHILD_SPEED)}</td></tr>
+        <tr><td><b>🧑 ผู้ใหญ่</b></td><td>${CHILD_AGE}–${ELDER_AGE - 1} ปี</td><td>ทำได้ทุกงาน เป็นช่างก่อสร้างและขนของได้ แต่งงานและมีลูกได้</td></tr>
+        <tr><td><b>👴👵 ผู้สูงอายุ</b></td><td>${ELDER_AGE} ปีขึ้นไป</td><td>ทำได้เฉพาะงานเบา เดินช้าลงเหลือ ${pct(ELDER_SPEED)} หลังค่อมและถือไม้เท้า</td></tr>
+      </table>
+      <h3>ใครทำงานไม่ได้</h3>
+      <ul>
+        <li><b>เด็ก</b> — ไม่ถูกจัดเข้างานและไม่ช่วยก่อสร้าง</li>
+        <li><b>หญิงตั้งครรภ์</b> — พักงานจนกว่าจะคลอด เดินช้าลงเหลือ ${pct(PREGNANT_SPEED)}</li>
+        <li><b>คนป่วย</b> — พักรักษาตัว (ดูแท็บ <i>ความเจ็บป่วย</i>)</li>
+        <li>งานที่ว่างลงจะถูกแทนด้วยผู้ใหญ่คนอื่นเอง และคนงานที่ป่วย ตั้งครรภ์ หรือแก่เกินงานหนักจะออกจากงานอัตโนมัติ</li>
+      </ul>
+      <h3>งานเบาสำหรับผู้สูงอายุ</h3>
+      <p>ผู้สูงอายุทำได้เฉพาะอาคารเหล่านี้: <b>${lightNames}</b>
+      ส่วนงานหนัก (ตัดไม้ ขุดหิน ทำนา ล่าสัตว์ ฯลฯ) และการก่อสร้างจะเป็นหน้าที่ของผู้ใหญ่ — ผู้สูงอายุที่ไม่มีงานเบาจะเดินเล่นและพักผ่อน</p>
+      <h3>แต่งงาน</h3>
+      <ul>
+        <li>ทุกเที่ยงคืน คนโสดอายุ ${MARRY_MIN}–${MARRY_MAX} ปีที่ไม่ป่วยมีโอกาสจับคู่กับเพศตรงข้ามที่อยู่ใกล้ที่สุด (หญิงแต่ละคนมีโอกาส ${pct(MARRY_CHANCE)} ต่อคืน)
+          ไม่แต่งกับพ่อแม่ ลูก หรือพี่น้อง</li>
+        <li>คู่สมรสต้องอยู่บ้านเดียวกัน — ย้ายไปอยู่บ้านฝ่ายชายก่อน ถ้าเต็มจึงเป็นฝ่ายหญิง ถ้าไม่มีที่ทั้งคู่จะรอบ้านใหม่ด้วยกัน</li>
+        <li>เหตุการณ์ 💍 จะแสดงที่กล่องข้อความมุมขวาล่าง</li>
+      </ul>
+      <h3>ตั้งครรภ์และคลอดลูก</h3>
+      <ul>
+        <li>ทุกเที่ยงคืน หญิงที่แต่งงานแล้ว อายุ ${FERTILE_MIN}–${FERTILE_MAX} ปี ไม่ป่วย อยู่ในบ้านที่<b>ยังมีที่ว่าง</b>และบ้านนั้นมีความสุข ≥ ${pct(0.5)}
+          มีโอกาสตั้งครรภ์ ${pct(PREG_CHANCE)} ต่อคืน (🤰)</li>
+        <li>ครบ ${PREG_DAYS} คืนจะคลอด 👶 เด็กใช้นามสกุลพ่อ และอยู่บ้านเดียวกับแม่เสมอ แม้บ้านจะเต็มก็ตาม</li>
+        <li>เด็กโตขึ้นทีละวัน — พออายุถึง ${CHILD_AGE} ปีก็เป็นผู้ใหญ่และเริ่มทำงานได้</li>
+      </ul>
+      <h3>ออกจากบ้าน</h3>
+      <p>คนโสดอายุ ${LEAVE_HOME_AGE} ปีขึ้นไปที่ยังอยู่กับพ่อแม่จะ<b>ย้ายออกไปหาบ้านของตัวเอง</b> เมื่อบ้านนั้นเต็มหรือล้น
+      คู่สมรสและลูกเล็กจะย้ายเข้าบ้านพร้อมกันเป็นครอบครัวเดียว ไม่แยกเด็กจากพ่อแม่ — ระบบจะสร้างบ้านเพิ่มในโซนที่อยู่ให้เมื่อจำเป็น</p>
+      <h3>วาระสุดท้าย</h3>
+      <p>ทุกคนมีอายุขัยไม่เท่ากัน ระหว่าง ${DEATH_MIN}–${DEATH_MAX} ปี เมื่อถึงวัยก็จะ 🕊️ <b>จากไปอย่างสงบ</b>
+      บ้านและงานของเขาว่างลง คู่สมรสที่ยังอยู่จะกลายเป็นหม้ายและหาคู่ใหม่ได้ ตัวเลขเกิด/ตายสะสมดูได้ที่คำอธิบายเมื่อชี้เมาส์ที่ 👥 ประชากร</p>
+      <h3>ครอบครัวผู้อพยพ</h3>
+      <p>คนที่ย้ายเข้ามาทุกคืนมีโอกาสครึ่งหนึ่งที่จะมาเป็น<b>ครอบครัว</b> (คู่สามีภรรยาพร้อมลูก 0–2 คน) ที่เหลือมาเป็นผู้ใหญ่โสด
+      ครอบครัวต้องการที่ว่างในบ้านหลังเดียวกัน — เด็กนับเป็นประชากรด้วย</p>
+      <h3>เคล็ดลับ</h3>
+      <ul>
+        <li>เก็บ<b>ที่ว่างในบ้านไว้เผื่อลูกที่จะเกิด</b> — บ้านที่เต็มแล้วจะไม่มีใครตั้งครรภ์ ระบายโซนที่อยู่ให้กว้างและอัปเกรดบ้านเพื่อเพิ่มที่อยู่</li>
+        <li>เด็กกินอาหารเท่าผู้ใหญ่แต่ยังไม่ทำงาน — ผลิตอาหารให้พอก่อนที่ประชากรเด็กจะเพิ่ม</li>
+        <li>ผู้สูงอายุเหมาะกับ<b>งานบริการ</b> (${lightNames}) — วางอาคารเหล่านี้ไว้เพื่อให้คนชรามีงานทำ ส่วนงานหนักต้องมีผู้ใหญ่พอ</li>
+        <li>ถ้าคนงานหนักขาด ให้ดูว่ามีผู้ใหญ่ว่างงานอยู่ไหม และลองลดจำนวนคนงานในอาคารที่ไม่จำเป็น</li>
+        <li>เหตุการณ์ครอบครัว (💍 แต่งงาน · 🤰 ตั้งครรภ์ · 👶 เกิด · 🕊️ จากไป) แสดงที่กล่องข้อความมุมขวาล่าง</li>
+      </ul>`,
   },
   {
     id: 'houses', title: '🏠 ระดับบ้าน',

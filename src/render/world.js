@@ -6,7 +6,8 @@ import {
   makeBuildingModel, makeSiteModel, WINDOW_MATERIALS,
 } from './models.js';
 import { createNodesView, createGroundDetail } from './nature.js';
-import { createSmoke, createFireflies } from './effects.js';
+import { createSmoke, createFireflies, createSparkles } from './effects.js';
+import { createAnimalsView } from './animals.js';
 import { createVillagerView } from './villagerView.js';
 
 const NIGHT_GLOW = 1.2;
@@ -66,6 +67,9 @@ export function createWorldView(scene, terrain) {
   const groundDetail = createGroundDetail(root, terrain);
   const smoke = createSmoke(root);
   const fireflies = createFireflies(root, { heightAt: (x, z) => heightAt(terrain, x, z) });
+  const animals = createAnimalsView(root, terrain);
+  const sparkles = createSparkles(root);
+  const modelGroups = new Map();   // buildingId -> finished model group (animals read userData.pen from it)
   let smokeDirty = true;
   const _v = new THREE.Vector3();
   const fireflyFocus = new THREE.Vector3();
@@ -124,7 +128,7 @@ export function createWorldView(scene, terrain) {
       group.add(makeSiteModel(info ? info.radius : 4, b.id));
       let ghost;
       if (b.type === 'cathedral') ghost = makeBuildingModel('cathedral', { stage: Math.min(4, (b.stage || 0) + 1), seed: b.id });
-      else if (b.type === 'house') ghost = makeBuildingModel('house', { level: Math.min(4, (b.level || 1) + (b.built ? 1 : 0)), seed: b.id });
+      else if (b.type === 'house') ghost = makeBuildingModel('house', { level: Math.min(5, (b.level || 1) + (b.built ? 1 : 0)), seed: b.id });
       else ghost = makeBuildingModel(b.type, { seed: b.id });
       group.userData.ghostMaterials = ghostify(ghost);
       group.add(ghost);
@@ -283,6 +287,14 @@ export function createWorldView(scene, terrain) {
     if (th) fireflyFocus.set(th.x, heightAt(terrain, th.x, th.z), th.z);
     fireflies.update(dt, night, fireflyFocus);
     villagerView.update(state, dt, clock);
+    modelGroups.clear();
+    for (const [id, { group }] of buildings) if (group.userData.model) modelGroups.set(id, group.userData.model);
+    animals.update(state, dt, modelGroups);
+    if (state.fx && state.fx.length) {
+      for (const fx of state.fx) if (fx.kind === 'upgrade') sparkles.burst(fx.x, heightAt(terrain, fx.x, fx.z), fx.z);
+      state.fx.length = 0;
+    }
+    sparkles.update(dt);
     updateHighlight(state);
     updateVillagerHighlight(state);
     lastState = state;
@@ -316,6 +328,7 @@ export function createWorldView(scene, terrain) {
     for (const { mesh } of zoneMeshes.values()) { root.remove(mesh); mesh.geometry.dispose(); }
     zoneMeshes.clear();
     nodesView.dispose(); groundDetail.dispose(); smoke.dispose(); fireflies.dispose();
+    animals.dispose(); sparkles.dispose();
     villagerView.dispose();
     ring.geometry.dispose(); ring.material.dispose();
     vRing.geometry.dispose(); vRing.material.dispose();

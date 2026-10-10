@@ -298,3 +298,123 @@ export function createFireflies(parent, opts = {}) {
 
   return { update, dispose };
 }
+
+// ------------------------------------------------------------------ sparkles (house upgrade)
+
+// Four-point twinkle star with a soft core, alpha channel only.
+function makeSparkTexture() {
+  const S = 64;
+  const data = new Uint8Array(S * S * 4);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const u = ((x + 0.5) / S - 0.5) * 2;
+      const v = ((y + 0.5) / S - 0.5) * 2;
+      const r2 = u * u + v * v;
+      const core = Math.exp(-r2 * 22);
+      const star = Math.max(Math.exp(-Math.abs(u) * 26 - Math.abs(v) * 2.6), Math.exp(-Math.abs(v) * 26 - Math.abs(u) * 2.6));
+      const a = Math.min(1, core * 1.2 + star * 0.9) * Math.max(0, 1 - r2 * 0.9);
+      const i = (y * S + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = 255;
+      data[i + 3] = Math.round(a * 255);
+    }
+  }
+  const tex = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const SPARKLE_CAP = 480;
+const SPARKLES_PER_BURST = 40;
+
+// Golden twinkling particle burst. burst(x, y, z) (building centre, ground height) spawns ~40 particles that rise and fade over ~2 s.
+// Call update(dt) once per frame (allocation-free). Several bursts can overlap (cap 480 live particles).
+export function createSparkles(parent) {
+  const bb = makeBillboards(SPARKLE_CAP, { color: 0xffcf4a, additive: true, uShade: 0 });
+  bb.mesh.name = 'sparkles';
+  bb.mat.uniforms.uColor.value.setRGB(1.6, 1.15, 0.3); // over-bright gold so the additive glow reads on sunlit grass
+  bb.map.dispose();
+  bb.map = makeSparkTexture();
+  bb.mat.uniforms.uMap.value = bb.map;
+  bb.mesh.renderOrder = 6;
+  parent.add(bb.mesh);
+
+  const rand = mulberry32(777);
+  const x = new Float32Array(SPARKLE_CAP);
+  const y = new Float32Array(SPARKLE_CAP);
+  const z = new Float32Array(SPARKLE_CAP);
+  const vx = new Float32Array(SPARKLE_CAP);
+  const vy = new Float32Array(SPARKLE_CAP);
+  const vz = new Float32Array(SPARKLE_CAP);
+  const age = new Float32Array(SPARKLE_CAP);
+  const life = new Float32Array(SPARKLE_CAP);
+  const size = new Float32Array(SPARKLE_CAP);
+  const phase = new Float32Array(SPARKLE_CAP);
+  const freq = new Float32Array(SPARKLE_CAP);
+  let n = 0;
+
+  function burst(bx, by, bz) {
+    for (let k = 0; k < SPARKLES_PER_BURST && n < SPARKLE_CAP; k++) {
+      const i = n++;
+      const a = rand() * Math.PI * 2;
+      const r = 1.3 + Math.sqrt(rand()) * 2.2; // a ring around the building so walls do not hide it
+      x[i] = bx + Math.cos(a) * r;
+      z[i] = bz + Math.sin(a) * r;
+      y[i] = by + rand() * 1.2;
+      vx[i] = (rand() - 0.5) * 0.5;
+      vz[i] = (rand() - 0.5) * 0.5;
+      vy[i] = 0.9 + rand() * 1.5;
+      age[i] = -rand() * 0.35; // staggered start
+      life[i] = 1.5 + rand() * 0.8;
+      size[i] = 0.6 + rand() * 0.7;
+      phase[i] = rand() * 6.283;
+      freq[i] = 9 + rand() * 9;
+    }
+  }
+
+  function update(dt) {
+    const P = bb.iPos.array;
+    const D = bb.iData.array;
+    let live = 0;
+    for (let i = 0; i < n;) {
+      age[i] += dt;
+      if (age[i] >= life[i]) { // swap-remove
+        const l = --n;
+        if (i !== l) {
+          x[i] = x[l]; y[i] = y[l]; z[i] = z[l]; vx[i] = vx[l]; vy[i] = vy[l]; vz[i] = vz[l];
+          age[i] = age[l]; life[i] = life[l]; size[i] = size[l]; phase[i] = phase[l]; freq[i] = freq[l];
+        }
+        continue;
+      }
+      if (age[i] > 0) {
+        x[i] += vx[i] * dt; y[i] += vy[i] * dt; z[i] += vz[i] * dt;
+        vy[i] *= 1 - 0.35 * dt;
+      }
+      const t = Math.max(0, age[i]) / life[i];
+      const twinkle = 0.35 + 0.65 * Math.abs(Math.sin(age[i] * freq[i] + phase[i]));
+      const fade = Math.min(1, t / 0.1) * (1 - t) * (1 - t * 0.3);
+      const vis = age[i] > 0 ? 1 : 0;
+      P[live * 3] = x[i]; P[live * 3 + 1] = y[i]; P[live * 3 + 2] = z[i];
+      D[live * 4] = size[i] * (0.7 + 0.5 * twinkle) * (1 - 0.35 * t);
+      D[live * 4 + 1] = vis * twinkle * fade;
+      D[live * 4 + 2] = age[i] * 1.5 + phase[i];
+      D[live * 4 + 3] = 0.5;
+      live++;
+      i++;
+    }
+    bb.geo.instanceCount = live;
+    bb.iPos.needsUpdate = true;
+    bb.iData.needsUpdate = true;
+  }
+
+  function dispose() {
+    parent.remove(bb.mesh);
+    bb.geo.dispose();
+    bb.mat.dispose();
+    bb.map.dispose();
+  }
+
+  return { burst, update, dispose };
+}

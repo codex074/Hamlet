@@ -4,7 +4,11 @@
 //
 // Public API:
 //   MAT, WINDOW_MATERIALS, NODE_MODELS, VILLAGER_MODEL, CARRY_MODEL           (unchanged shapes)
-//   makeBuildingModel(type, { level = 1, stage = 0, seed = 0 } = {}) -> THREE.Group
+//   makeBuildingModel(type, { level = 1 (houses 1..5), stage = 0, seed = 0 } = {}) -> THREE.Group
+//     types: townhall storehouse woodcutter forager quarry sawmill farmhouse mill bakery chapel tavern cathedral house
+//            fishery hunter herbalist sheepfarm ironmine weaver blacksmith infirmary market
+// sheepfarm: group.userData.pen = { x, z, r } (local pen centre / radius, open grass inside, for the sheep).
+// blacksmith hearth uses the 'hot' glass material (member of WINDOW_MATERIALS: glows with emissiveIntensity).
 //   makeSiteModel(radius = 4, seed = 0) -> THREE.Group
 // group.userData.chimneys = [{x,y,z}, ...] (local chimney-top positions, for smoke).
 // Named children: 'sails' (mill; spin rotation.z), 'sawblade' (sawmill; spin rotation.z), 'flag' (townhall).
@@ -57,6 +61,7 @@ function glassMat(color, emissive) {
 }
 
 const WINDOW = glassMat(0x2c3340, 0xffc060);
+const HOT = glassMat(0xd4561c, 0xff7a24); // forge hearth / hot iron: glows orange, brighter at night
 const STAINED = [
   glassMat(0x8a1f2a, 0xff3040),
   glassMat(0x1f3f8a, 0x3060ff),
@@ -76,7 +81,7 @@ for (const key of Object.keys(TEXSPEC)) {
     color: 0xffffff, vertexColors: true, side: key === 'cloth' ? THREE.DoubleSide : THREE.FrontSide,
   });
 }
-const PARTMAT = { ...SOLID, win: WINDOW, st0: STAINED[0], st1: STAINED[1], st2: STAINED[2], st3: STAINED[3] };
+const PARTMAT = { ...SOLID, win: WINDOW, hot: HOT, st0: STAINED[0], st1: STAINED[1], st2: STAINED[2], st3: STAINED[3] };
 const AO_KEYS = new Set(['plaster', 'timber', 'planks', 'stone', 'cobble', 'hay', 'flat']);
 
 let mapsReady = false;
@@ -539,7 +544,7 @@ class Kit {
       geo.setAttribute('color', new THREE.Float32BufferAttribute(part.c, 3));
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, PARTMAT[key]);
-      const isGlass = key === 'win' || /^st\d$/.test(key);
+      const isGlass = key === 'win' || key === 'hot' || /^st\d$/.test(key);
       mesh.name = isGlass ? 'window' : key;
       mesh.castShadow = !isGlass;
       mesh.receiveShadow = true;
@@ -1989,6 +1994,982 @@ function tavern(k, st) {
   flowerBed(k, 0.4, 2.55, 1.0, 0.4);
 }
 
+// ---------------------------------------------------------------- profession buildings (fishery .. market)
+
+const BONE = 0xe8dcc0;
+const HIDES = [0x8a5a3a, 0xa9784a, 0x6f4a30, 0xc09468];
+const LEAVES = [0x5f9040, 0x4f8038, 0x78a850, 0x6a9a58];
+const LAVENDER = 0x8a62b8;
+const DYES = [0xb83a30, 0x2f5a9a, 0xd9a432, 0x4f8a48, 0x7a4a8a, 0xe8e0cc];
+const ROCKS = [0x8a8780, 0x7c7a74, 0x95918a, 0x6e6c68];
+const RUST = [0xb4571f, 0xc8742c, 0x9a4620];
+
+// Jittered low-poly ellipsoid / dome with crisp facets (cached per key). Coincident vertices move together.
+const lumpCache = new Map();
+function lumpyG(seg, rings, amp, seed, hemi = false) {
+  const key = `${seg}/${rings}/${amp}/${seed}/${hemi}`;
+  let g = lumpCache.get(key);
+  if (g) return g;
+  g = newGeo();
+  const base = sphereG(seg, rings, hemi);
+  const P = [];
+  for (let i = 0; i < base.p.length; i += 3) {
+    const x = base.p[i], y = base.p[i + 1], z = base.p[i + 2];
+    const h = Math.abs(Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 19.19) * 43758.5453) % 1;
+    const f = 1 + amp * (h - 0.5) * 2;
+    P.push([x * f, hemi && y < 0.02 ? 0 : y * f, z * f]);
+  }
+  for (let i = 0; i < P.length; i += 3) tri(g, P[i], P[i + 1], P[i + 2]);
+  lumpCache.set(key, g);
+  return g;
+}
+
+function boulder(k, x, y, z, sx, sy, sz, col, seed = 0, ry = 0) {
+  k.geo('flat', lumpyG(6, 4, 0.2, seed, false), x, y, z, ry, { sx, sy, sz, c: col, j: 0.1 });
+}
+
+function antlers(k, x, y, z, ry = 0, s = 1) {
+  k.push(x, y, z, ry, s);
+  for (const sd of [-1, 1]) {
+    const P = [[0, 0, 0], [0.1, 0.22, 0], [0.25, 0.46, 0.04], [0.32, 0.8, 0.02]];
+    for (let i = 0; i < 3; i++) {
+      k.bar('flat', [sd * P[i][0], P[i][1], P[i][2]], [sd * P[i + 1][0], P[i + 1][1], P[i + 1][2]], 0.075 - i * 0.012, 0.075 - i * 0.012, { c: BONE, ao: false });
+    }
+    k.bar('flat', [sd * 0.1, 0.22, 0], [sd * 0.06, 0.52, 0.12], 0.05, 0.05, { c: BONE, ao: false });
+    k.bar('flat', [sd * 0.25, 0.46, 0.04], [sd * 0.46, 0.66, 0.1], 0.045, 0.045, { c: BONE, ao: false });
+    k.bar('flat', [sd * 0.32, 0.8, 0.02], [sd * 0.2, 0.98, 0.0], 0.04, 0.04, { c: BONE, ao: false });
+    k.bar('flat', [sd * 0.32, 0.8, 0.02], [sd * 0.44, 0.98, 0.0], 0.04, 0.04, { c: BONE, ao: false });
+  }
+  k.box('planks', 0.34, 0.2, 0.06, 0, -0.12, 0, { c: 0x8a6240 });
+  k.pop();
+}
+
+// Stretched hide on a lashed frame, facing +z.
+function hideFrame(k, x, z, ry, c = HIDES[0]) {
+  k.push(x, 0, z, ry);
+  const w = 0.95, h = 1.25;
+  for (const sx of [-1, 1]) k.bar('timber', [sx * (w / 2 + 0.06), 0, -0.12], [sx * (w / 2 + 0.06), h + 0.35, 0], 0.08, 0.08, { c: 0x6a4a2c });
+  k.bar('timber', [-w / 2 - 0.08, 0.3, 0.02], [w / 2 + 0.08, 0.3, 0.02], 0.07, 0.07, { c: 0x6a4a2c });
+  k.bar('timber', [-w / 2 - 0.08, 0.3 + h, 0.02], [w / 2 + 0.08, 0.3 + h, 0.02], 0.07, 0.07, { c: 0x6a4a2c });
+  const pts = [];
+  const n = 10;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const ex = 0.5 + 0.1 * Math.sin(a * 3 + 1) * (k.r() * 0.5 + 0.5);
+    pts.push([Math.cos(a) * w * ex, 0.3 + h / 2 + Math.sin(a) * h * 0.5 * (0.9 + 0.08 * Math.cos(a * 4))]);
+  }
+  k.geo('cloth', shapeG(pts), 0, 0, 0.03, 0, { c, ao: false });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.2;
+    const lx = Math.cos(a) * (w / 2 + 0.03), ly = 0.3 + h / 2 + Math.sin(a) * (h / 2 + 0.03);
+    k.bar('flat', [lx, ly, 0.04], [Math.sign(lx) * (w / 2 + 0.08), Math.min(h + 0.3, Math.max(0.3, ly)), 0.02], 0.02, 0.02, { c: 0xb8a070, ao: false });
+  }
+  k.pop();
+}
+
+// Drying rack hung with something: 'fish' | 'meat' | 'herbs' | 'skeins'
+function dryingRack(k, x, z, ry, len = 1.7, kind = 'fish', h = 1.55) {
+  k.push(x, 0, z, ry);
+  for (const sx of [-1, 1]) {
+    k.bar('timber', [sx * len / 2, 0, -0.2], [sx * len / 2, h, 0], 0.07, 0.07, { c: 0x6a4a2c });
+    k.bar('timber', [sx * len / 2, 0, 0.2], [sx * len / 2, h, 0], 0.07, 0.07, { c: 0x6a4a2c });
+  }
+  k.bar('timber', [-len / 2 - 0.08, h, 0], [len / 2 + 0.08, h, 0], 0.07, 0.07, { c: 0x6a4a2c });
+  k.bar('timber', [-len / 2, h * 0.68, 0], [len / 2, h * 0.68, 0], 0.05, 0.05, { c: 0x6a4a2c });
+  const n = Math.max(3, Math.round(len / 0.26));
+  for (let i = 0; i < n; i++) {
+    const hx = -len / 2 + 0.16 + ((len - 0.32) * i) / (n - 1);
+    const lo = i % 2 === 1;
+    const top = lo ? h * 0.68 : h;
+    if (kind === 'fish') {
+      const fl = 0.34 + k.r() * 0.08;
+      k.sph('flat', 0.045, fl / 2, 0.03, hx, top - 0.1 - fl / 2, 0, 5, 3, { c: k.r.pick([0xb8c8d0, 0xa6bac6, 0xc8b894]), ao: false });
+      k.pyr('flat', 0.12, 0.03, 0.12, hx, top - 0.1 - fl - 0.1, 0, { c: 0x8aa0ac, rx: Math.PI, ao: false });
+    } else if (kind === 'meat') {
+      k.cone('flat', 0.075, 0.38, hx, top - 0.4, 0, 5, { c: k.r.pick([0x8a3a2c, 0x6e2e24, 0xa04a38]), rx: Math.PI, caps: 'none', ao: false });
+    } else if (kind === 'herbs') {
+      k.bar('flat', [hx, top, 0], [hx, top - 0.1, 0], 0.02, 0.02, { c: 0xb8a070 });
+      k.cone('flat', 0.1, 0.42, hx, top - 0.5, 0, 5, { c: k.r.pick(LEAVES.concat([0xb8923a, LAVENDER])), rx: Math.PI, caps: 'none', ao: false });
+    } else {
+      k.cyl('flat', 0.07, 0.07, 0.34, hx, top - 0.4, 0, 6, { c: DYES[i % DYES.length], ao: false, caps: 'none' });
+      k.sph('flat', 0.075, 0.05, 0.075, hx, top - 0.42, 0, 5, 2, { c: DYES[i % DYES.length], ao: false });
+    }
+  }
+  k.pop();
+}
+
+function stool(k, x, z, h = 0.42) {
+  k.cyl('planks', 0.2, 0.18, h, x, 0, z, 6, { c: 0xc29a68 });
+}
+
+// ---------------------------------------------------------------- fishery
+
+function fishery(k, st) {
+  const tc = TIMBERS[1];
+  const py = 0.72;
+  // stilts + platform
+  for (const [px, pz] of [[-1.35, -1.55], [1.35, -1.55], [-1.35, 0.05], [1.35, 0.05], [-1.35, 1.1], [1.35, 1.1], [0, -1.55]]) {
+    k.box('timber', 0.2, py + 0.6, 0.2, px, -0.6, pz, { c: tc, nb: true });
+  }
+  for (const pz of [-1.45, 0.05, 1.1]) k.box('timber', 3.0, 0.1, 0.14, 0, py - 0.35, pz, { c: tc });
+  k.box('planks', 3.2, 0.12, 3.0, 0, py, -0.2, { c: 0xc29a68 });
+  const yb = py + 0.12;
+  const w = 2.3, d = 1.8, h = 1.55;
+  storey(k, {
+    w, d, h, y: yb, z: -0.65, mat: 'planks', tint: 0xd8b886, frame: true, tc, st, sp: 1.2, bp: 0.3,
+    f: [{ t: 'door', x: -0.5, w: 0.72, h: 1.35, step: false }, { t: 'win', x: 0.55, y: 0.65, w: 0.5, h: 0.5, shut: true, shutc: st.shut }, { t: 'lantern', x: 0.05, y: 1.2 }],
+    r: [{ t: 'win', x: 0, y: 0.7, w: 0.42, h: 0.46, shut: true, shutc: st.shut }],
+    l: [{ t: 'win', x: 0, y: 0.7, w: 0.42, h: 0.46 }], b: [],
+  });
+  gableRoof(k, { w, d, y: yb + h, z: -0.65, type: st.thatchy ? 'thatch' : 'shingles', R: st.thatchy ? 1.15 : 0.95, ox: 0.35, oz: 0.42, tint: st.thatchy ? st.thatch : st.shingle, fill: { key: 'planks', tint: 0xd8b886 }, tc });
+  // porch rail
+  k.push(0, yb, 0, 0);
+  fence(k, -1.5, 0.35, -1.5, 1.3, 'rail', 0.6);
+  fence(k, 1.5, 0.35, 1.5, 1.3, 'rail', 0.6);
+  fence(k, -1.5, 1.3, -0.45, 1.3, 'rail', 0.6);
+  fence(k, 0.45, 1.3, 1.5, 1.3, 'rail', 0.6);
+  barrel(k, 1.1, 0.7, 0, 0.85);
+  crate(k, 1.15, -0.1 + 0.0, 0, 0.8, 0.2);
+  k.pop();
+  // jetty
+  for (const pz of [2.0, 3.0, 3.75]) for (const sx of [-1, 1]) k.box('timber', 0.17, 1.4, 0.17, sx * 0.72, -0.8, pz, { c: tc, nb: true });
+  for (let i = 0; i < 10; i++) {
+    k.box('planks', 1.7, 0.08, 0.27, (k.r() - 0.5) * 0.04, 0.58, 1.36 + i * 0.255, { c: k.r.pick(WOODS), ry: (k.r() - 0.5) * 0.02 });
+  }
+  for (const sx of [-1, 1]) k.box('timber', 0.1, 0.12, 2.6, sx * 0.72, 0.5, 2.6, { c: tc });
+  // steps down from the porch to the jetty
+  k.box('planks', 1.3, 0.1, 0.4, 0, 0.66, 1.34, { c: 0xb08658 });
+  // mooring posts, lantern post, coiled rope
+  for (const sx of [-1, 1]) {
+    k.cyl('timber', 0.1, 0.1, 0.62, sx * 0.78, 0.6, 3.72, 6, { c: 0x6a4a2c });
+  }
+  k.box('timber', 0.1, 1.5, 0.1, 0.78, 0.6, 2.3, { c: tc });
+  lanternAt(k, 0.78, 1.55, 2.3, 0.0);
+  k.cyl('flat', 0.17, 0.17, 0.1, -0.4, 0.66, 3.3, 7, { c: 0xb8a070, caps: 'both' });
+  crate(k, 0.35, 2.4, 0.66, 0.7, 0.3);
+  for (let i = 0; i < 4; i++) k.sph('flat', 0.05, 0.14, 0.035, 0.22 + i * 0.1, 1.2, 2.4, 5, 3, { c: 0xb8c8d0, rz: 1.4, ao: false });
+  // rowing boat tied up beside the jetty
+  k.push(1.55, 0.12, 3.0, 0.12);
+  k.sph('planks', 0.5, 0.36, 1.25, 0, 0.5, 0, 8, 3, { c: 0x9a7448, hemi: true, rx: Math.PI });
+  k.sph('planks', 0.47, 0.012, 1.18, 0, 0.485, 0, 8, 2, { c: 0x8a6a46, hemi: true, ao: false });
+  k.box('planks', 0.8, 0.06, 0.22, 0, 0.42, 0.2, { c: 0xc29a68, ao: false });
+  k.box('planks', 0.8, 0.06, 0.22, 0, 0.42, -0.5, { c: 0xc29a68, ao: false });
+  k.bar('timber', [-0.5, 0.5, 0.0], [-0.95, 0.66, -0.55], 0.04, 0.04, { c: 0x6a4a2c });
+  k.pop();
+  // shore: fish rack, net on poles, baskets
+  dryingRack(k, -2.4, 1.6, 0.35, 1.6, 'fish');
+  k.push(2.3, 0, 0.4, -0.4);
+  for (const sx of [-1, 1]) k.bar('timber', [sx * 0.95, 0, 0], [sx * 0.9, 1.7, 0.1], 0.07, 0.07, { c: 0x6a4a2c });
+  for (let i = 0; i < 11; i++) {
+    const nx = -0.82 + i * 0.164;
+    k.quad('cloth', [nx - 0.045, 1.62, 0.1], [nx + 0.045, 1.62, 0.1], [nx * 0.88 + 0.045, 0.78, 0.12], [nx * 0.88 - 0.045, 0.78, 0.12], { c: 0xb8a878, ao: false });
+    k.quad('cloth', [nx * 0.88 - 0.045, 0.78, 0.12], [nx * 0.88 + 0.045, 0.78, 0.12], [nx + 0.045, 0.3, 0.3], [nx - 0.045, 0.3, 0.3], { c: 0xb8a878, ao: false });
+  }
+  for (const [y, z] of [[1.3, 0.105], [1.0, 0.115], [0.7, 0.14], [0.45, 0.22]]) {
+    k.quad('cloth', [-0.86 + (1.62 - y) * 0.1, y, z], [0.86 - (1.62 - y) * 0.1, y, z], [0.86 - (1.62 - y) * 0.1, y + 0.04, z], [-0.86 + (1.62 - y) * 0.1, y + 0.04, z], { c: 0x9a8a5e, ao: false });
+  }
+  for (let i = 0; i < 6; i++) k.sph('flat', 0.055, 0.055, 0.055, -0.8 + i * 0.32, 1.6, 0.14, 4, 2, { c: i % 2 ? 0xd8433a : 0xf2e8d0, ao: false });
+  k.pop();
+  const basket = (x, z, s = 1) => {
+    k.cyl('planks', 0.25 * s, 0.32 * s, 0.34 * s, x, 0, z, 7, { c: 0xc29a68, caps: 'none' });
+    for (let i = 0; i < 4; i++) k.sph('flat', 0.14 * s, 0.05, 0.05, x + (i % 2 - 0.5) * 0.12, 0.34 * s, z + (i > 1 ? 0.08 : -0.08), 5, 2, { c: 0xb8c8d0, ry: i, ao: false });
+  };
+  basket(-1.5, 2.6);
+  basket(-1.05, 2.95, 0.85);
+  barrel(k, -2.7, 0.2, 0, 0.9);
+  bush(k, 2.7, 2.4, 0.4);
+  bush(k, -2.9, -1.2, 0.45);
+}
+
+// ---------------------------------------------------------------- hunter
+
+function hunter(k, st) {
+  const w = 2.4, d = 2.0, h = 1.55, y0 = 0.2;
+  const tc = TIMBERS[2];
+  k.push(-0.2, 0, -0.7, 0);
+  k.box('stone', w + 0.16, y0, d + 0.16, 0, 0, 0, { c: 0xa8a190, nb: true });
+  storey(k, {
+    w, d, h, y: y0, mat: 'planks', tint: 0xb89464, frame: true, tc, st, sp: 1.2, bp: 0.5,
+    f: [{ t: 'door', x: 0.45, w: 0.74, h: 1.38, step: false }, { t: 'win', x: -0.6, y: 0.72, w: 0.42, h: 0.46, shut: true, shutc: 0x7a5535 }],
+    r: [], l: [{ t: 'win', x: 0, y: 0.72, w: 0.4, h: 0.45 }], b: [],
+  });
+  const roof = gableRoof(k, { w, d, y: y0 + h, type: 'thatch', R: 1.4, ox: 0.32, oz: 0.5, tint: st.thatch, fill: { key: 'planks', tint: 0xb89464 }, tc });
+  void roof;
+  chimneyAt(k, -0.7, y0 + h + 0.35, -0.4, 1.0, 0.42, 0.42);
+  // furs draped over the porch beam + mounted skull plaque
+  k.push(0, 0, d / 2, 0);
+  k.geo('cloth', shapeG([[-0.2, 0], [0.2, 0], [0.26, 0.5], [0.1, 0.7], [-0.1, 0.7], [-0.26, 0.5]]), -0.85, 0.65, 0.12, 0, { c: HIDES[1], ao: false });
+  k.pop();
+  k.pop();
+  // antler post by the path
+  k.box('timber', 0.16, 1.9, 0.16, -1.65, 0, 0.95, { c: tc });
+  k.bar('timber', [-1.65, 1.55, 0.95], [-1.4, 1.2, 0.95], 0.08, 0.08, { c: tc });
+  antlers(k, -1.65, 1.9, 0.95, 0.3, 1.2);
+  signBoard(k, -1.65, 1.0, 1.05, 0.6, 0.4, 0xc29a68, 0.3);
+  // hide frames, drying meat
+  hideFrame(k, 1.95, 0.75, -0.5, HIDES[0]);
+  hideFrame(k, 2.4, -0.55, -1.2, HIDES[3]);
+  dryingRack(k, -2.3, -0.9, Math.PI / 2 + 0.1, 1.5, 'meat', 1.45);
+  // archery target + bow
+  k.push(1.0, 0, 2.7, 0.2);
+  for (const sx of [-1, 1]) k.bar('timber', [sx * 0.5, 0, -0.35], [sx * 0.1, 1.0, 0], 0.07, 0.07, { c: 0x6a4a2c });
+  k.bar('timber', [0, 0, 0.4], [0, 1.0, 0.0], 0.07, 0.07, { c: 0x6a4a2c });
+  const rings = [[0.5, 0xe8dcc0], [0.38, 0x2e2a28], [0.27, 0xd8433a], [0.14, 0xf2c230]];
+  rings.forEach(([r, c], i) => k.cyl('flat', r, r, 0.05, 0, 1.0, -0.03 + i * 0.012, 10, { c, rx: Math.PI / 2, ao: false }));
+  k.pop();
+  // campfire ring with log seats
+  k.push(-0.5, 0, 2.3, 0);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    k.sph('stone', 0.13, 0.1, 0.13, Math.cos(a) * 0.42, 0.07, Math.sin(a) * 0.42, 5, 3, { c: k.r.pick(STONES) });
+  }
+  k.disc('flat', 0.36, 0, 0.06, 0, 7, { c: 0x2a2420, ao: false });
+  for (let i = 0; i < 3; i++) k.bar('timber', [Math.cos(i * 2.1) * 0.28, 0.12, Math.sin(i * 2.1) * 0.28], [0, 0.32, 0], 0.07, 0.07, { c: 0x3a2a1c });
+  k.cyl('timber', 0.17, 0.17, 0.9, 0.2, 0.17, 0.95, 6, { c: 0x7a5a3a, rz: Math.PI / 2, rx: 0, caps: 'none' });
+  k.cyl('timber', 0.17, 0.17, 0.9, -1.0, 0.17, 0.0, 6, { c: 0x7a5a3a, rx: Math.PI / 2, caps: 'none' });
+  k.pop();
+  k.cyl('timber', 0.28, 0.3, 0.45, 1.9, 0, 2.0, 7, { c: 0x8a6a46 });
+  k.disc('flat', 0.26, 1.9, 0.45, 2.0, 7, { c: 0xdcbf8c, ao: false });
+  k.box('flat', 0.4, 0.08, 0.05, 1.82, 0.5, 2.0, { c: IRON, rz: 0.4 });
+  woodpile(k, 1.9, -1.9, 0.4, 1.0, 3);
+  bush(k, -2.6, 2.4, 0.5);
+  bush(k, 2.8, 1.8, 0.45);
+  mushrooms(k, -2.3, 0.5);
+}
+
+// ---------------------------------------------------------------- herbalist
+
+function herbBed(k, x, z, w, d, ry = 0, kind = 0) {
+  k.push(x, 0, z, ry);
+  const t = 0.07;
+  k.box('planks', w, 0.2, t, 0, 0, d / 2 - t / 2, { c: 0x8a6240 });
+  k.box('planks', w, 0.2, t, 0, 0, -d / 2 + t / 2, { c: 0x8a6240 });
+  for (const sx of [-1, 1]) k.box('planks', t, 0.2, d - 2 * t, sx * (w / 2 - t / 2), 0, 0, { c: 0x8a6240 });
+  k.box('flat', w - 2 * t, 0.17, d - 2 * t, 0, 0, 0, { c: SOIL, nb: true });
+  const cols = Math.max(3, Math.round((w - 0.2) / 0.22));
+  const rows = Math.max(2, Math.round((d - 0.2) / 0.24));
+  for (let i = 0; i < cols; i++) {
+    for (let j = 0; j < rows; j++) {
+      const px = -w / 2 + 0.16 + ((w - 0.32) * i) / (cols - 1);
+      const pz = -d / 2 + 0.14 + ((d - 0.28) * j) / (rows - 1);
+      const type = (kind + j) % 3;
+      if (type === 0) k.sph('flat', 0.09, 0.1, 0.09, px, 0.25, pz, 4, 2, { c: k.r.pick(LEAVES), ao: false });
+      else if (type === 1) k.cone('flat', 0.05, 0.3, px, 0.17, pz, 4, { c: LAVENDER, caps: 'none', ao: false });
+      else { k.cyl('flat', 0.015, 0.015, 0.22, px, 0.17, pz, 3, { c: 0x5f9040, caps: 'none', ao: false }); k.sph('flat', 0.06, 0.04, 0.06, px, 0.4, pz, 4, 2, { c: k.r.pick([0xf2c230, 0xf6f2e6, 0xe27aa8]), ao: false }); }
+    }
+  }
+  k.pop();
+}
+
+function skep(k, x, z, y = 0, s = 1) {
+  k.sph('hay', 0.2 * s, 0.22 * s, 0.2 * s, x, y + 0.02, z, 7, 3, { c: 0xe0b860, hemi: true });
+  k.cyl('hay', 0.2 * s, 0.2 * s, 0.1 * s, x, y, z, 7, { c: 0xd0a850, caps: 'none' });
+  k.box('flat', 0.08 * s, 0.05 * s, 0.03, x, y + 0.03 * s, z + 0.19 * s, { c: 0x1a120c, ao: false });
+}
+
+function potPlant(k, x, z, y = 0, s = 1) {
+  k.cyl('flat', 0.12 * s, 0.09 * s, 0.2 * s, x, y, z, 6, { c: 0xb86a44, caps: 'none' });
+  k.sph('flat', 0.14 * s, 0.12 * s, 0.14 * s, x, y + 0.26 * s, z, 5, 3, { c: k.r.pick(LEAVES), j: 0.1 });
+}
+
+function herbalist(k, st) {
+  const w = 2.6, d = 2.0, h = 1.6, y0 = 0.2;
+  const tc = TIMBERS[0];
+  const tint = k.r.pick([0xdfe6bc, 0xe6dcb0, 0xf0e4c4]);
+  k.push(0.2, 0, -0.9, 0);
+  k.box('stone', w + 0.16, y0, d + 0.16, 0, 0, 0, { c: st.stone, nb: true });
+  storey(k, {
+    w, d, h, y: y0, tint, frame: true, tc, st, sp: 1.3, bp: 0.2,
+    f: [
+      { t: 'door', x: -0.55, w: 0.75, h: 1.42, step: true },
+      { t: 'win', x: 0.55, y: 0.72, w: 0.55, h: 0.55, shut: true, flowers: true, shutc: 0x4f7a62 },
+      { t: 'lantern', x: -1.05, y: 1.3 },
+    ],
+    r: [{ t: 'win', x: 0, y: 0.75, w: 0.45, h: 0.5, shut: true, shutc: 0x4f7a62 }],
+    l: [{ t: 'win', x: 0, y: 0.75, w: 0.45, h: 0.5, shut: true, shutc: 0x4f7a62 }], b: [],
+  });
+  const R = 1.4;
+  gableRoof(k, { w, d, y: y0 + h, type: 'thatch', R, ox: 0.32, oz: 0.55, tint: st.thatch, fill: { key: 'plaster', tint }, tc });
+  for (const s of [-1, 1]) {
+    k.push(s * w / 2, y0 + h, 0, s * Math.PI / 2);
+    gableFrame(k, d, R, tc);
+    k.pop();
+  }
+  gableChimney(k, 1, w, 0.0, y0 + h + 0.3, y0 + h + R + 0.4);
+  // hanging herb bundles along the eave
+  k.bar('timber', [-1.05, y0 + h - 0.15, d / 2 + 0.28], [1.05, y0 + h - 0.15, d / 2 + 0.28], 0.06, 0.06, { c: 0x6a4a2c });
+  for (let i = 0; i < 7; i++) {
+    const bx = -0.95 + i * 0.32;
+    k.cone('flat', 0.09, 0.4, bx, y0 + h - 0.58, d / 2 + 0.28, 5, { c: k.r.pick(LEAVES.concat([0xb8923a, LAVENDER, 0xd9c070])), rx: Math.PI, caps: 'none', ao: false });
+  }
+  k.pop();
+  // herb garden in front
+  herbBed(k, -1.5, 1.9, 1.5, 0.6, 0.05, 0);
+  herbBed(k, 0.4, 2.35, 1.5, 0.6, -0.05, 1);
+  herbBed(k, 2.1, 1.7, 1.2, 0.6, 0.35, 2);
+  herbBed(k, 2.55, 0.1, 0.55, 1.5, 0.1, 1);
+  fence(k, -2.3, 2.7, -0.8, 3.0, 'wattle', 0.5);
+  fence(k, 1.1, 3.1, 2.6, 2.7, 'wattle', 0.5);
+  dryingRack(k, -2.45, -0.2, Math.PI / 2 + 0.15, 1.5, 'herbs', 1.5);
+  skep(k, -2.1, 1.2, 0.0, 1.0);
+  skep(k, -2.35, 0.8, 0.0, 0.85);
+  potPlant(k, -0.9, 1.35, 0, 1);
+  potPlant(k, 0.55, 1.35, 0, 0.9);
+  barrel(k, 2.3, -1.4, 0, 0.9);
+  k.cyl('flat', 0.25, 0.22, 0.14, 1.25, 0, 1.45, 7, { c: 0x8a8a84, ao: false });
+  k.sph('flat', 0.2, 0.09, 0.2, 1.25, 0.14, 1.45, 6, 2, { c: 0x6a8a48, hemi: true, ao: false });
+  bench(k, 0.8, 1.45, 0.1, 0.9);
+  bush(k, -2.7, -1.4, 0.45);
+  mushrooms(k, 1.5, -2.2);
+}
+
+// ---------------------------------------------------------------- sheep farm
+
+function sheepfarm(k, st) {
+  const tc = TIMBERS[1];
+  const bw = 5.4, bd = 3.6, bh = 2.1, y0 = 0.25, bz = -4.2;
+  const penZ = 2.0, fenceR = 4.7;
+  k.pen = { x: 0, z: penZ, r: 3.9 };
+  // barn at the back
+  k.push(0, 0, bz, 0);
+  k.box('stone', bw + 0.3, y0, bd + 0.3, 0, 0, 0, { c: 0xb8b2a0, nb: true });
+  storey(k, {
+    w: bw, d: bd, h: bh, y: y0, mat: 'planks', tint: 0xd6b88a, frame: true, tc, st, sp: 1.5, bp: 0.7, tw: 0.14,
+    f: [
+      {
+        t: 'fn', fn: (kk) => {
+          kk.box('flat', 1.9, 1.85, 0.04, 0, 0, 0.02, { c: 0x1a120c, wall: true, ao: false });
+          kk.sph('hay', 0.8, 0.55, 0.35, -0.1, 0.4, -0.1, 6, 3, { c: 0xf0d890 });
+          kk.box('timber', 0.18, 2.05, 0.18, -1.05, 0, 0.09, { c: tc, wall: true });
+          kk.box('timber', 0.18, 2.05, 0.18, 1.05, 0, 0.09, { c: tc, wall: true });
+          kk.box('timber', 2.4, 0.2, 0.2, 0, 1.85, 0.1, { c: tc, wall: true });
+          for (const s of [-1, 1]) {
+            kk.push(s * 1.1, 0, 0.1, -s * 1.2);
+            kk.box('planks', 0.95, 1.8, 0.07, s * -0.48, 0, 0, { c: 0x8a6240 });
+            kk.bar('timber', [s * -0.05, 0.1, 0.05], [s * -0.9, 1.7, 0.05], 0.1, 0.03, { c: tc });
+            kk.pop();
+          }
+        },
+      },
+      { t: 'win', x: -2.0, y: 1.0, w: 0.4, h: 0.5, shut: true, shutc: st.shut },
+      { t: 'win', x: 2.0, y: 1.0, w: 0.4, h: 0.5, shut: true, shutc: st.shut },
+    ],
+    r: [{ t: 'win', x: 0, y: 1.0, w: 0.5, h: 0.5, shut: true, shutc: st.shut }], l: [], b: [],
+  });
+  const R = 1.9;
+  gableRoof(k, { w: bw, d: bd, y: y0 + bh, type: 'thatch', R, ox: 0.4, oz: 0.5, tint: st.thatch, fill: { key: 'planks', tint: 0xd6b88a }, tc });
+  // loft door on the left gable
+  k.box('flat', 0.7, 0.7, 0.05, -bw / 2 - 0.02, y0 + bh + 0.35, 0, { c: 0x1a120c, ry: Math.PI / 2, ao: false });
+  chimneyAt(k, 1.3, y0 + bh + 0.9, -0.8, 1.2, 0.45, 0.45);
+  k.pop();
+  // fenced pen: ring of rail fence, a gap at the front for the gate, closed against the barn
+  const N = 18;
+  const pts = [];
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    pts.push([Math.sin(a) * fenceR, penZ + Math.cos(a) * fenceR]);
+  }
+  const bFront = bz + bd / 2 + 0.15;
+  const barnSide = (i) => {
+    const j = ((i % N) + N) % N;
+    const mx = (pts[j][0] + pts[j + 1][0]) / 2, mz = (pts[j][1] + pts[j + 1][1]) / 2;
+    return mz < bFront + 0.2 && Math.abs(mx) < bw / 2 + 0.8;
+  };
+  for (let i = 1; i < N; i++) {
+    if (barnSide(i)) continue;
+    fence(k, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], 'rail', 0.78);
+    // close the ring against the barn corners
+    if (barnSide(i + 1)) fence(k, pts[i + 1][0], pts[i + 1][1], Math.sign(pts[i + 1][0]) * bw / 2, bFront, 'rail', 0.78);
+    if (barnSide(i - 1)) fence(k, pts[i][0], pts[i][1], Math.sign(pts[i][0]) * bw / 2, bFront, 'rail', 0.78);
+  }
+  // gate posts + open gate leaf
+  k.box('timber', 0.16, 1.1, 0.16, 0, 0, pts[0][1] - 0.05, { c: tc });
+  k.box('timber', 0.16, 1.1, 0.16, pts[1][0], 0, pts[1][1], { c: tc });
+  k.push(pts[1][0], 0, pts[1][1], 1.9);
+  for (const yy of [0.25, 0.5, 0.75]) k.bar('timber', [0, yy, 0], [0, yy, -1.4], 0.07, 0.06, { c: 0x8a6a44 });
+  k.bar('timber', [0, 0.2, 0], [0, 0.8, -1.4], 0.06, 0.05, { c: 0x8a6a44 });
+  k.pop();
+  // pen furniture (kept near the fence so the middle stays open for the flock)
+  const tr = (x, z, ry) => {
+    k.push(x, 0, z, ry);
+    k.box('planks', 1.5, 0.08, 0.5, 0, 0.36, 0, { c: 0xc29a68 });
+    for (const sx of [-1, 1]) k.box('planks', 0.08, 0.36, 0.5, sx * 0.7, 0, 0, { c: 0x8a6240 });
+    for (const sz of [-1, 1]) k.box('planks', 1.5, 0.22, 0.06, 0, 0.36, sz * 0.25, { c: 0xa87f50 });
+    k.box('hay', 1.3, 0.12, 0.36, 0, 0.4, 0, { c: 0xf0d890 });
+    k.pop();
+  };
+  tr(-3.1, 3.9, -0.7);
+  hayBale(k, 3.2, 4.4, 0, 0.7, 0.9);
+  hayBale(k, 3.5, 3.9, 0.5, 0.2, 0.9);
+  // water trough
+  k.push(3.3, 0, 0.6, 0.9);
+  k.box('planks', 1.2, 0.34, 0.45, 0, 0, 0, { c: 0xa87f50, nb: true });
+  k.box('flat', 1.05, 0.04, 0.32, 0, 0.3, 0, { c: 0x3a6a86, ao: false });
+  k.pop();
+  // wool bales and shearing stool by the barn
+  for (let i = 0; i < 3; i++) k.sph('cloth', 0.34, 0.26, 0.28, 3.3 + (i % 2) * 0.25, 0.26 + (i > 1 ? 0.42 : 0), -3.0 + (i % 2) * 0.55, 6, 3, { c: 0xf2eee0, ao: false });
+  stool(k, -3.4, -2.5);
+  bench(k, -3.7, -3.4, Math.PI / 2, 1.0);
+  // shepherd's crook, sacks, barrel
+  k.bar('timber', [-3.2, 0, -2.0], [-3.1, 1.6, -2.0], 0.05, 0.05, { c: 0x6a4a2c });
+  k.bar('timber', [-3.1, 1.6, -2.0], [-2.95, 1.62, -2.0], 0.05, 0.05, { c: 0x6a4a2c });
+  sack(k, 3.9, -1.6, 0, 0xdad0b0);
+  barrel(k, -4.0, -1.0, 0, 0.9);
+  bush(k, 4.6, 5.0, 0.4);
+  bush(k, -4.7, 4.5, 0.4);
+}
+
+// ---------------------------------------------------------------- iron mine
+
+function oreChunk(k, x, y, z, s, seed) {
+  boulder(k, x, y, z, s, s * 0.75, s, k.r.pick([RUST[0], RUST[1], 0x3a3433, 0x4a4442, RUST[2]]), seed, k.r() * 6);
+}
+
+function ironmine(k, st) {
+  const tc = TIMBERS[1];
+  // rocky mound
+  k.geo('flat', lumpyG(9, 5, 0.1, 41, true), 0, 0, -1.0, 0.3, { sx: 3.5, sy: 3.2, sz: 3.2, c: ROCKS[0], j: 0.06 });
+  boulder(k, -2.4, 0.9, -0.6, 1.2, 1.0, 1.3, ROCKS[1], 3, 0.4);
+  boulder(k, 2.5, 0.8, -0.9, 1.1, 0.95, 1.2, ROCKS[2], 4, 1.1);
+  boulder(k, -1.4, 1.9, -2.0, 1.5, 1.2, 1.4, ROCKS[3], 5, 2.0);
+  boulder(k, 1.5, 2.1, -1.9, 1.3, 1.1, 1.2, ROCKS[0], 6, 0.2);
+  boulder(k, 0.0, 2.9, -1.4, 1.3, 0.9, 1.1, ROCKS[2], 7, 0.9);
+  boulder(k, -2.0, 0.4, 1.0, 0.7, 0.6, 0.7, ROCKS[2], 8, 0.5);
+  boulder(k, 2.2, 0.35, 1.2, 0.6, 0.5, 0.6, ROCKS[1], 9, 1.5);
+  // rusty ore veins in the rock
+  for (const [x, y, z, s] of [[-2.5, 1.5, 0.3, 0.42], [-2.3, 2.0, -0.7, 0.34], [2.5, 1.7, 0.1, 0.4], [2.2, 2.3, -0.9, 0.3], [-0.9, 3.0, -0.3, 0.36], [1.2, 2.8, -0.6, 0.32], [-1.2, 2.5, 0.5, 0.3]]) {
+    oreChunk(k, x, y, z, s, 20 + Math.floor(x * 7));
+  }
+  // portal: stone-faced entrance with a timber-braced tunnel mouth
+  const px = 0.95;
+  k.box('stone', 1.0, 2.3, 1.5, -(px + 0.5), 0, 1.5, { c: 0xcfc8b6, nb: true });
+  k.box('stone', 1.0, 2.3, 1.5, px + 0.5, 0, 1.5, { c: 0xc7c0ae, nb: true });
+  k.box('stone', 3.0, 0.65, 1.5, 0, 1.65, 1.5, { c: 0xd2cbba, nb: true });
+  k.box('flat', 1.9, 1.7, 0.2, 0, 0, 1.2, { c: 0x0b0908, ao: false });
+  k.box('flat', 1.9, 1.7, 0.2, 0, 0, 2.0, { c: 0x0b0908, ao: false, nb: true });
+  const fz = 2.28;
+  for (const sx of [-1, 1]) {
+    k.box('timber', 0.24, 1.75, 0.24, sx * 0.86, 0, fz, { c: tc });
+    k.bar('timber', [sx * 0.86, 1.2, fz], [sx * 0.4, 1.78, fz], 0.14, 0.14, { c: tc });
+  }
+  k.box('timber', 2.2, 0.26, 0.28, 0, 1.75, fz, { c: tc });
+  k.box('planks', 2.7, 0.2, 0.2, 0, 2.05, fz - 0.05, { c: 0x8a6240 });
+  lanternAt(k, 0, 1.58, fz + 0.1, 0.0);
+  k.bar('flat', [0.0, 1.78, fz + 0.1], [0, 1.6, fz + 0.1], 0.03, 0.03, { c: IRON });
+  // boulders crowning the portal
+  boulder(k, -1.55, 2.5, 1.2, 0.85, 0.7, 0.9, ROCKS[0], 10, 0.8);
+  boulder(k, 1.6, 2.45, 1.1, 0.8, 0.65, 0.85, ROCKS[3], 11, 2.2);
+  boulder(k, 0.0, 2.75, 0.8, 1.0, 0.6, 0.8, ROCKS[1], 12, 0.4);
+  // rails + sleepers leading out of the mine
+  for (let i = 0; i < 9; i++) k.box('timber', 0.95, 0.05, 0.13, 0, 0.0, 1.5 + i * 0.5, { c: 0x5a3e28, nb: true });
+  for (const sx of [-1, 1]) k.bar('flat', [sx * 0.34, 0.07, 1.5], [sx * 0.34, 0.07, 5.5], 0.06, 0.06, { c: 0x7a7a80, ao: false });
+  // ore cart on the rails
+  k.push(0, 0.1, 3.9, 0.04);
+  k.box('planks', 0.9, 0.08, 1.15, 0, 0.18, 0, { c: 0x7a5a3a });
+  k.box('planks', 0.07, 0.4, 1.15, -0.46, 0.18, 0, { c: 0x6a4a2c });
+  k.box('planks', 0.07, 0.4, 1.15, 0.46, 0.18, 0, { c: 0x6a4a2c });
+  k.box('planks', 0.9, 0.4, 0.07, 0, 0.18, -0.58, { c: 0x6a4a2c });
+  k.box('planks', 0.9, 0.4, 0.07, 0, 0.18, 0.58, { c: 0x6a4a2c });
+  k.box('flat', 0.84, 0.3, 1.08, 0, 0.2, 0, { c: 0x2e2a28, ao: false });
+  for (let i = 0; i < 6; i++) oreChunk(k, (k.r() - 0.5) * 0.5, 0.52 + k.r() * 0.1, (k.r() - 0.5) * 0.8, 0.17 + k.r() * 0.07, 30 + i);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.cyl('flat', 0.14, 0.14, 0.06, sx * 0.4, 0.14, sz * 0.4, 7, { c: IRON, rz: Math.PI / 2, ao: false });
+  k.pop();
+  // ore pile, pickaxes, wheelbarrow, barrel, hoist frame
+  for (let i = 0; i < 9; i++) {
+    const a = k.r() * 6.28, rr = k.r() * 0.7;
+    oreChunk(k, -2.4 + Math.cos(a) * rr, 0.14 + (0.7 - rr) * 0.3, 2.8 + Math.sin(a) * rr, 0.22 + k.r() * 0.14, 50 + i);
+  }
+  k.bar('timber', [2.3, 0, 2.2], [2.5, 1.2, 2.3], 0.06, 0.06, { c: 0x6a4a2c });
+  k.box('flat', 0.45, 0.07, 0.06, 2.5, 1.2, 2.3, { c: IRON, rz: 0.2, ao: false });
+  k.bar('timber', [2.65, 0, 2.15], [2.8, 1.1, 2.3], 0.06, 0.06, { c: 0x6a4a2c });
+  k.box('flat', 0.4, 0.07, 0.06, 2.8, 1.1, 2.3, { c: IRON, rz: -0.2, ao: false });
+  k.push(2.5, 0, 3.4, -0.5);
+  k.box('planks', 0.5, 0.1, 0.8, 0, 0.32, 0, { c: 0xa87f50 });
+  wheel(k, 0, 0.2, 0.5, 0.2);
+  oreChunk(k, 0, 0.5, 0, 0.17, 77);
+  k.pop();
+  barrel(k, 3.1, 1.2, 0, 0.95);
+  crate(k, -3.1, 1.6, 0, 0.9, 0.3);
+  mushrooms(k, -3.4, -2.2);
+}
+
+// ---------------------------------------------------------------- weaver
+
+function loom(k, x, z, ry) {
+  k.push(x, 0, z, ry);
+  const T = 0x6a4a2c;
+  for (const sx of [-1, 1]) k.box('timber', 0.1, 1.7, 0.12, sx * 0.55, 0, 0, { c: T });
+  k.box('timber', 1.3, 0.1, 0.12, 0, 1.6, 0, { c: T });
+  k.box('timber', 1.3, 0.1, 0.12, 0, 0.55, 0, { c: T });
+  for (const sx of [-1, 1]) k.bar('timber', [sx * 0.55, 0, -0.4], [sx * 0.55, 0.9, 0], 0.07, 0.07, { c: T });
+  k.quad('cloth', [-0.5, 0.6, 0.0], [0.5, 0.6, 0.0], [0.5, 1.55, 0.0], [-0.5, 1.55, 0.0], { c: 0xe8dcc0, ao: false });
+  // woven stripes at the bottom
+  const rows = [0xb83a30, 0xe8dcc0, 0x2f5a9a, 0xd9a432, 0xb83a30, 0x2f5a9a];
+  rows.forEach((c, i) => k.quad('cloth', [-0.5, 0.6 + i * 0.075, 0.015], [0.5, 0.6 + i * 0.075, 0.015], [0.5, 0.675 + i * 0.075, 0.015], [-0.5, 0.675 + i * 0.075, 0.015], { c, ao: false }));
+  k.box('timber', 1.2, 0.05, 0.05, 0, 1.25, 0.06, { c: 0x8a6a44 });
+  k.box('planks', 0.7, 0.07, 0.35, 0, 0.42, -0.5, { c: 0xc29a68 });
+  for (const sx of [-1, 1]) k.box('timber', 0.06, 0.42, 0.06, sx * 0.3, 0, -0.5, { c: T });
+  k.pop();
+}
+
+function spinningWheel(k, x, z, ry) {
+  k.push(x, 0, z, ry);
+  for (const sx of [-1, 1]) k.bar('timber', [sx * 0.25, 0.7, 0], [sx * 0.3, 0, sx * 0.1], 0.05, 0.05, { c: 0x6a4a2c });
+  k.bar('timber', [-0.3, 0.72, 0], [0.3, 0.72, 0], 0.07, 0.07, { c: 0x6a4a2c });
+  wheel(k, 0.0, 0.62, -0.1, 0.34, 0);
+  k.box('planks', 0.5, 0.05, 0.3, 0, 0.2, 0.0, { c: 0xc29a68 });
+  k.pop();
+}
+
+function weaver(k, st) {
+  const w = 3.2, d = 2.2, h = 1.9, y0 = 0.22;
+  const tc = TIMBERS[0];
+  k.push(0, 0, -1.2, 0);
+  plinth(k, w, d, y0, 0, 0, st.stone);
+  storey(k, {
+    w, d, h, y: y0, tint: st.plaster, frame: true, tc, st, mid: 0.95, sp: 1.1,
+    f: [
+      { t: 'door', x: -0.95, w: 0.8, h: 1.55, step: true },
+      { t: 'win', x: 0.35, y: 0.75, w: 0.55, h: 0.6, shut: true, flowers: true },
+      { t: 'win', x: 1.15, y: 0.8, w: 0.4, h: 0.5, shut: false },
+    ],
+    r: [{ t: 'win', x: 0, y: 0.8, w: 0.5, h: 0.65, shut: true }],
+    l: [{ t: 'win', x: 0, y: 0.8, w: 0.5, h: 0.65, shut: true }],
+    b: [{ t: 'win', x: -0.6, y: 0.8, w: 0.5, h: 0.65, shut: true }, { t: 'win', x: 0.8, y: 0.8, w: 0.5, h: 0.65, shut: true }],
+  });
+  const R = 1.45;
+  const roof = gableRoof(k, { w, d, y: y0 + h, type: 'tiles', R, ox: 0.3, oz: 0.38, tint: st.tile, fill: { key: 'plaster', tint: st.plaster }, tc });
+  for (const s of [-1, 1]) {
+    k.push(s * w / 2, y0 + h, 0, s * Math.PI / 2);
+    gableFrame(k, d, R, tc);
+    k.pop();
+  }
+  gableChimney(k, -1, w, 0.0, y0 + h + 0.25, y0 + h + roof.ridge);
+  k.pop();
+  // open porch (lean-to roof on posts) with the loom under it
+  const pz = 0.0; // front wall plane z = -1.2 + 1.1 = -0.1
+  const pw = 3.4, pd = 2.1;
+  for (const sx of [-1, 1]) k.box('timber', 0.17, 2.1, 0.17, sx * (pw / 2 - 0.1), 0, pz + pd - 0.1, { c: tc });
+  k.box('timber', pw, 0.18, 0.2, 0, 2.05, pz + pd - 0.1, { c: tc });
+  for (const sx of [-1, 1]) k.bar('timber', [sx * (pw / 2 - 0.1), 1.55, pz + pd - 0.1], [sx * (pw / 2 - 0.7), 2.05, pz + pd - 0.1], 0.1, 0.1, { c: tc });
+  k.box('shingles', pw + 0.4, 0.09, pd + 0.5, 0, 2.2, pz + pd / 2 + 0.05, { c: st.shingle, rx: 0.17, ao: false });
+  k.box('planks', pw, 0.08, pd, 0, 0, pz + pd / 2 - 0.05, { c: 0xb89060, nb: true });
+  loom(k, 0.6, pz + 1.0, 0.08);
+  spinningWheel(k, 1.25, pz + 1.55, -0.6);
+  // wool skeins on a rack, dye tubs, cloth bolts
+  dryingRack(k, -2.6, 1.6, 0.15, 1.5, 'skeins', 1.5);
+  for (let i = 0; i < 3; i++) {
+    const tx = -1.55 + i * 0.7;
+    k.cyl('planks', 0.3, 0.34, 0.45, tx, 0, 2.6, 8, { c: 0xa87f50, caps: 'none' });
+    k.cyl('flat', 0.29, 0.29, 0.03, tx, 0.41, 2.6, 8, { c: DYES[i], ao: false });
+  }
+  for (let i = 0; i < 4; i++) k.cyl('cloth', 0.12, 0.12, 0.7, 2.4, 0.12 + (i % 2) * 0.24, 2.0 + (i > 1 ? 0.0 : 0.28) - (i > 1 ? 0.12 : 0), 6, { c: DYES[(i + 2) % DYES.length], rz: Math.PI / 2, caps: 'both', ao: false });
+  for (let i = 0; i < 3; i++) k.sph('cloth', 0.22, 0.17, 0.2, -2.5 + i * 0.35, 0.17, 0.25 - (i % 2) * 0.1, 5, 3, { c: 0xf2eee0, ao: false });
+  sack(k, 2.5, -0.4, 0, 0xefe8d8);
+  bush(k, 2.6, -1.9, 0.45);
+  bush(k, -2.6, -1.2, 0.4);
+  flowerBed(k, 0.4, 3.0, 1.2, 0.4);
+  barrel(k, -2.4, 0.2, 0, 0.9);
+}
+
+// ---------------------------------------------------------------- blacksmith
+
+function anvil(k, x, y, z, ry = 0) {
+  k.push(x, y, z, ry);
+  k.frus('flat', 0.34, 0.2, 0.24, 0.16, 0.2, 0, 0, 0, { c: 0x3a3836, ao: false });
+  k.box('flat', 0.5, 0.14, 0.2, 0, 0.2, 0, { c: 0x4a4846, ao: false });
+  k.cone('flat', 0.1, 0.22, 0.34, 0.27, 0, 5, { c: 0x4a4846, rz: -Math.PI / 2, caps: 'none', ao: false });
+  k.pop();
+}
+
+function blacksmith(k, st) {
+  const tc = TIMBERS[1];
+  const slate = 0xd4d8e2;
+  // cobbled working floor
+  k.box('cobble', 5.3, 0.1, 5.2, 0, 0, 0.3, { c: 0xcfc6b0, nb: true });
+  // back and left stone walls with the forge built into them
+  k.box('stone', 4.9, 2.3, 0.45, 0, 0, -2.1, { c: 0xdcd5c4, nb: true });
+  k.box('stone', 0.45, 2.3, 2.6, -2.35, 0, -0.8, { c: 0xd8d1c0, nb: true });
+  k.box('stone', 4.9, 0.18, 0.6, 0, 2.3, -2.1, { c: 0xcfc8b6, nb: true });
+  // posts + roof
+  for (const [x, z] of [[2.35, 1.0], [-2.35, 1.0], [2.35, -2.0]]) k.box('timber', 0.22, 2.55, 0.22, x, 0, z, { c: tc });
+  k.box('timber', 4.9, 0.22, 0.24, 0, 2.5, 1.0, { c: tc });
+  k.box('timber', 0.24, 0.22, 3.2, 2.35, 2.5, -0.5, { c: tc });
+  for (const sx of [-1, 1]) k.bar('timber', [sx * 2.35, 1.85, 1.0], [sx * 1.7, 2.5, 1.0], 0.12, 0.12, { c: tc });
+  const roof = gableRoof(k, { w: 4.9, d: 3.3, y: 2.7, z: -0.55, type: 'slate', R: 1.35, ox: 0.4, oz: 0.5, tint: slate, fill: { key: 'stone', tint: 0xdcd5c4 }, tc });
+  void roof;
+  // open forge beside the shed: stone hearth with glowing coals, back wall and tall stack
+  const hx = 3.4, hz = 0.1;
+  k.box('stone', 1.4, 0.9, 1.1, hx, 0, hz, { c: 0xd8d0be, nb: true });
+  k.box('stone', 1.4, 0.2, 0.22, hx, 0.9, hz - 0.44, { c: 0xcfc8b6 });
+  for (const sx of [-1, 1]) k.box('stone', 0.2, 0.2, 0.8, hx + sx * 0.6, 0.9, hz + 0.05, { c: 0xcfc8b6 });
+  k.box('flat', 1.0, 0.04, 0.8, hx, 0.9, hz + 0.1, { c: 0x2a2420, ao: false });
+  k.box('hot', 0.92, 0.06, 0.66, hx, 0.94, hz + 0.1, { ao: false });
+  for (let i = 0; i < 5; i++) k.sph('hot', 0.09, 0.06, 0.08, hx - 0.34 + i * 0.17, 1.0, hz + 0.05 + (i % 2) * 0.14, 4, 2, { ao: false });
+  k.box('flat', 0.62, 0.38, 0.05, hx, 0.14, hz + 0.56, { c: 0x1a120c, ao: false });
+  k.box('hot', 0.46, 0.22, 0.03, hx, 0.22, hz + 0.59, { ao: false });
+  k.frus('stone', 1.3, 0.6, 0.78, 0.52, 3.4, hx, 0.9, hz - 0.62, { c: 0xd2cbba });
+  k.box('stone', 0.84, 0.14, 0.58, hx, 4.3, hz - 0.62, { c: 0xb0a998 });
+  k.box('stone', 0.4, 0.1, 0.3, hx, 4.44, hz - 0.62, { c: 0x2a2420, ao: false });
+  k.chimneyTop(hx, 4.75, hz - 0.62);
+  // bellows leaning on the forge
+  k.push(hx - 0.95, 0.5, hz + 0.3, 0.5);
+  k.frus('planks', 0.5, 0.12, 0.2, 0.08, 0.7, 0, 0, 0, { c: 0x8a5a3a, rx: -Math.PI / 2 + 0.2 });
+  k.bar('timber', [0, 0.3, -0.25], [0, 0.55, -0.35], 0.05, 0.05, { c: 0x6a4a2c });
+  k.pop();
+  // workbench and anvil inside the shed
+  k.box('planks', 1.5, 0.08, 0.6, 0.6, 0.85, -1.6, { c: 0xc29a68 });
+  for (const sx of [-1, 1]) k.box('timber', 0.1, 0.85, 0.5, 0.6 + sx * 0.65, 0, -1.6, { c: 0x5b3b25 });
+  k.box('flat', 0.22, 0.1, 0.07, 0.3, 0.93, -1.6, { c: IRON, ry: 0.3, ao: false });
+  k.cyl('timber', 0.34, 0.38, 0.5, -0.7, 0.0, -0.2, 8, { c: 0x7a5a3a });
+  anvil(k, -0.7, 0.5, -0.2, 0.3);
+  // anvil on a stump, quench barrel, tool rack on the back wall
+  k.cyl('timber', 0.34, 0.38, 0.5, 2.3, 0.0, 1.9, 8, { c: 0x7a5a3a });
+  anvil(k, 2.3, 0.5, 1.9, 0.3);
+  k.box('hot', 0.26, 0.04, 0.08, 2.2, 0.86, 1.9, { ry: 0.3, ao: false });
+  k.cyl('planks', 0.4, 0.46, 0.8, 1.0, 0.0, 2.1, 8, { c: 0x7a5a3a, caps: 'none' });
+  k.disc('flat', 0.36, 1.0, 0.8, 2.1, 8, { c: 0x2a4a5c, ao: false });
+  k.bar('flat', [1.0, 1.0, 2.1], [1.15, 0.82, 2.3], 0.03, 0.03, { c: IRON });
+  // tools on the wall: hammer, tongs, sword, horseshoes
+  k.push(0.45, 0, -1.86, 0);
+  k.box('planks', 1.9, 0.09, 0.1, 0.3, 1.5, 0, { c: 0x6a4a2c });
+  k.bar('timber', [-0.3, 1.0, 0.1], [-0.3, 1.45, 0.1], 0.05, 0.05, { c: 0x6a4a2c });
+  k.box('flat', 0.22, 0.12, 0.1, -0.3, 1.45, 0.1, { c: IRON, ao: false });
+  k.bar('flat', [0.05, 1.45, 0.1], [0.0, 0.95, 0.1], 0.04, 0.02, { c: IRON, ao: false });
+  k.bar('flat', [0.1, 1.45, 0.1], [0.14, 0.95, 0.1], 0.04, 0.02, { c: IRON, ao: false });
+  k.bar('flat', [0.6, 1.45, 0.1], [0.6, 0.55, 0.1], 0.07, 0.025, { c: 0xb4b8be, ao: false });
+  k.box('flat', 0.3, 0.05, 0.05, 0.6, 0.98, 0.1, { c: 0x6a4a2c, ao: false });
+  for (let i = 0; i < 3; i++) k.cyl('flat', 0.1, 0.1, 0.03, 1.0 + i * 0.28, 1.2, 0.1, 6, { c: 0x4a4846, rx: Math.PI / 2, ao: false });
+  k.pop();
+  // coal heap, ore & ingot crate, grindstone, finished tools
+  for (let i = 0; i < 8; i++) {
+    const a = k.r() * 6.28, rr = k.r() * 0.5;
+    k.sph('flat', 0.12, 0.09, 0.11, -1.8 + Math.cos(a) * rr, 0.1 + (0.5 - rr) * 0.3, -0.2 + Math.sin(a) * rr, 4, 2, { c: k.r.pick([0x1c1a1a, 0x2a2626, 0x3a3434]) });
+  }
+  crate(k, 1.9, -1.55, 0, 0.9, 0.2);
+  for (let i = 0; i < 3; i++) k.box('flat', 0.2, 0.06, 0.1, 1.82 + i * 0.1, 0.5 + i * 0.0, -1.55, { c: 0x7a7e86, ry: 0.4 * i, ao: false });
+  k.push(-0.8, 0, 2.5, 0.5);
+  for (const sx of [-1, 1]) k.bar('timber', [sx * 0.3, 0, 0.0], [sx * 0.22, 0.7, 0.0], 0.06, 0.06, { c: 0x6a4a2c });
+  k.cyl('stone', 0.3, 0.3, 0.1, 0, 0.7, 0, 10, { c: 0xb4b2a8, rz: Math.PI / 2, caps: 'both' });
+  k.pop();
+  // horseshoes + pickaxe leaning outside, barrels, sign
+  barrel(k, 3.5, 1.6, 0, 0.9);
+  barrel(k, 3.9, 1.2, 0, 0.85);
+  bench(k, -2.0, 1.7, Math.PI / 2, 1.1);
+  k.box('timber', 0.1, 2.0, 0.1, -2.6, 0, 3.0, { c: tc });
+  k.bar('timber', [-2.6, 1.9, 3.0], [-2.0, 1.9, 3.0], 0.07, 0.07, { c: tc });
+  k.box('flat', 0.55, 0.45, 0.04, -2.2, 1.35, 3.0, { c: 0x3a3836, ao: false });
+  k.cyl('flat', 0.15, 0.15, 0.03, -2.2, 1.38, 3.03, 7, { c: 0xd8d0be, rx: Math.PI / 2, ao: false });
+  stoneBlocks(k, -3.0, -1.6, 2, 0.4);
+}
+
+// ---------------------------------------------------------------- infirmary
+
+function crossEmblem(k, x, y, z, s = 1) {
+  const c = 0xc8454a;
+  k.quad('cloth', [x - 0.09 * s, y - 0.3 * s, z], [x + 0.09 * s, y - 0.3 * s, z], [x + 0.09 * s, y + 0.3 * s, z], [x - 0.09 * s, y + 0.3 * s, z], { c, ao: false });
+  k.quad('cloth', [x - 0.3 * s, y - 0.09 * s, z + 0.005], [x + 0.3 * s, y - 0.09 * s, z + 0.005], [x + 0.3 * s, y + 0.09 * s, z + 0.005], [x - 0.3 * s, y + 0.09 * s, z + 0.005], { c, ao: false });
+  k.disc('flat', 0.075 * s, x, y, z + 0.01, 6, { rx: Math.PI / 2, c: 0xf2c230, ao: false });
+}
+
+function infirmary(k, st) {
+  const tc = TIMBERS[0];
+  const stoneT = 0xe6dfcf;
+  const w = 4.4, d = 3.1, h1 = 2.1, h2 = 1.85, y0 = 0.3;
+  const X = -0.9;
+  k.push(X, 0, -0.4, 0);
+  plinth(k, w, d, y0, 0, 0, 0xb8b2a0);
+  storey(k, {
+    w, d, h: h1, y: y0, mat: 'stone', tint: stoneT, st,
+    f: [
+      { t: 'door', x: 0, w: 1.0, h: 1.8, arch: true },
+      { t: 'awin', x: -1.4, y: 0.6, w: 0.6, h: 1.1, pointed: false },
+      { t: 'awin', x: 1.4, y: 0.6, w: 0.6, h: 1.1, pointed: false },
+      { t: 'lantern', x: -0.9, y: 1.75 }, { t: 'lantern', x: 0.9, y: 1.75 },
+    ],
+    r: [], l: [{ t: 'awin', x: 0, y: 0.6, w: 0.6, h: 1.1, pointed: false }],
+    b: [{ t: 'awin', x: -1.0, y: 0.6, w: 0.6, h: 1.1, pointed: false }, { t: 'awin', x: 1.0, y: 0.6, w: 0.6, h: 1.1, pointed: false }],
+  });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    for (let i = 0; i < 5; i++) {
+      const wq = i % 2 ? 0.32 : 0.44;
+      k.box('stone', wq, 0.34, wq, sx * w / 2, y0 + i * 0.4, sz * d / 2, { c: 0xf0ead8 });
+    }
+  }
+  k.box('timber', w + 0.1, 0.12, d + 0.1, 0, y0 + h1, 0, { c: tc, nb: true });
+  const yb = y0 + h1 + 0.12;
+  storey(k, {
+    w, d, h: h2 - 0.12, y: yb, tint: st.plaster === 0xefc47c ? 0xf3ead2 : st.plaster, frame: true, tc, st, sp: 1.0,
+    f: [
+      { t: 'win', x: -1.45, y: 0.5, w: 0.55, h: 0.8, shut: true, flowers: true },
+      { t: 'win', x: 0, y: 0.5, w: 0.55, h: 0.8, shut: true, flowers: true },
+      { t: 'win', x: 1.45, y: 0.5, w: 0.55, h: 0.8, shut: true, flowers: true },
+    ],
+    r: [{ t: 'win', x: 0, y: 0.5, w: 0.55, h: 0.8, shut: true }], l: [{ t: 'win', x: 0, y: 0.5, w: 0.55, h: 0.8, shut: true }],
+    b: [{ t: 'win', x: -1.0, y: 0.5, w: 0.55, h: 0.8, shut: true }, { t: 'win', x: 1.0, y: 0.5, w: 0.55, h: 0.8, shut: true }],
+  });
+  const top = yb + h2 - 0.12;
+  const R = 1.55;
+  const roof = gableRoof(k, { w, d, y: top, type: 'slate', R, ox: 0.25, oz: 0.3, tint: 0xd4d8e2, fill: { key: 'plaster', tint: st.plaster }, tc });
+  for (const s of [-1, 1]) {
+    k.push(s * w / 2, top, 0, s * Math.PI / 2);
+    gableFrame(k, d, R, tc);
+    k.pop();
+  }
+  dormerAt(k, { x: 0, y0: top, zf: d / 2 - 0.12, d, R, t: roof.t, type: 'slate', tint: 0xd4d8e2, wallTint: st.plaster, shut: st.shut, tc });
+  gableChimney(k, -1, w, 0.0, top + 0.1, top + R + 0.05, 0xe6dfcf);
+  // emblem banner hung above the door
+  k.push(0, 0, d / 2 + 0.02, 0);
+  k.box('timber', 0.95, 0.07, 0.08, 0, yb - 0.55, 0.1, { c: tc });
+  k.quad('cloth', [-0.4, yb - 0.55, 0.12], [0.4, yb - 0.55, 0.12], [0.4, yb - 1.35, 0.12], [-0.4, yb - 1.35, 0.12], { c: 0xf6f2e6, ao: false });
+  k.quad('cloth', [-0.4, yb - 1.35, 0.12], [0.4, yb - 1.35, 0.12], [0, yb - 1.55, 0.12], [-0.4, yb - 1.35, 0.12], { c: 0xf6f2e6, ao: false });
+  crossEmblem(k, 0, yb - 0.95, 0.14, 0.9);
+  k.pop();
+  k.pop();
+  // single-storey ward annex on the right
+  const aw = 2.4, ad = 2.5, ah = 1.7, ax = X + w / 2 + aw / 2 - 0.1, az = -0.4 - 0.2;
+  plinth(k, aw, ad, y0, ax, az, 0xb8b2a0);
+  storey(k, {
+    w: aw, d: ad, h: ah, y: y0, x: ax, z: az, mat: 'stone', tint: stoneT, st,
+    f: [{ t: 'awin', x: -0.45, y: 0.55, w: 0.55, h: 1.0, pointed: false }, { t: 'awin', x: 0.55, y: 0.55, w: 0.55, h: 1.0, pointed: false }],
+    r: [{ t: 'awin', x: 0, y: 0.55, w: 0.55, h: 1.0, pointed: false }], l: [], b: [{ t: 'win', x: 0, y: 0.7, w: 0.5, h: 0.6, shut: true }],
+  });
+  k.box('timber', aw + 0.1, 0.1, ad + 0.1, ax, y0 + ah, az, { c: tc, nb: true });
+  gableRoof(k, { w: aw, d: ad, y: y0 + ah + 0.1, x: ax, z: az, type: 'slate', R: 1.1, ox: 0.25, oz: 0.3, tint: 0xd4d8e2, fill: { key: 'stone', tint: stoneT }, tc });
+  // herb garden in front, drying bundles, benches
+  herbBed(k, -2.7, 2.1, 1.4, 0.6, 0.0, 0);
+  herbBed(k, -0.9, 2.45, 1.5, 0.6, 0.0, 1);
+  herbBed(k, 0.9, 2.45, 1.5, 0.6, 0.0, 2);
+  herbBed(k, 2.7, 2.05, 1.3, 0.6, 0.0, 0);
+  k.box('cobble', 1.0, 0.05, 1.5, X, 0, 1.9, { c: 0xd8d0be, nb: true });
+  bench(k, -3.1, 0.7, Math.PI / 2, 1.1);
+  bench(k, 3.3, 1.2, Math.PI / 2, 1.1);
+  dryingRack(k, 1.0, -2.6, 0.0, 1.8, 'herbs', 1.5);
+  fence(k, -3.5, 3.1, -1.5, 3.1, 'picket', 0.6);
+  fence(k, 1.6, 3.1, 3.5, 3.1, 'picket', 0.6);
+  barrel(k, 3.4, -1.3, 0, 0.9);
+  bush(k, -3.4, -1.4, 0.45);
+  potPlant(k, -1.9, 1.35, 0, 1.0);
+  potPlant(k, 0.1, 1.35, 0, 0.9);
+}
+
+// ---------------------------------------------------------------- market
+
+function stall(k, x, z, ry, o) {
+  k.push(x, 0, z, ry);
+  const w = 2.3, d = 1.2;
+  for (const sx of [-1, 1]) {
+    k.box('timber', 0.12, 2.35, 0.12, sx * w / 2, 0, -d / 2, { c: 0x5b3b25 });
+    k.box('timber', 0.12, 1.95, 0.12, sx * w / 2, 0, d / 2, { c: 0x5b3b25 });
+  }
+  k.box('planks', w, 0.9, 0.7, 0, 0, d / 2 - 0.35, { c: 0xc29a68, nb: true });
+  k.box('planks', w + 0.14, 0.07, 0.8, 0, 0.9, d / 2 - 0.35, { c: 0xdcb888 });
+  k.box('planks', w, 1.45, 0.06, 0, 0.5, -d / 2, { c: 0xa87f50, nb: true });
+  // striped awning sloping forward, with scalloped front edge
+  const n = 8;
+  for (let i = 0; i < n; i++) {
+    const x0 = -w / 2 - 0.15 + (i * (w + 0.3)) / n, x1 = -w / 2 - 0.15 + ((i + 1) * (w + 0.3)) / n;
+    const c = i % 2 ? o.c2 : o.c1;
+    k.quad('cloth', [x0, 2.4, -d / 2 - 0.1], [x1, 2.4, -d / 2 - 0.1], [x1, 1.98, d / 2 + 0.35], [x0, 1.98, d / 2 + 0.35], { c, ao: false });
+    k.quad('cloth', [x0, 1.98, d / 2 + 0.35], [x1, 1.98, d / 2 + 0.35], [(x0 + x1) / 2, 1.78, d / 2 + 0.38], [x0, 1.98, d / 2 + 0.35], { c, ao: false });
+  }
+  k.bar('timber', [-w / 2 - 0.15, 1.98, d / 2 + 0.35], [w / 2 + 0.15, 1.98, d / 2 + 0.35], 0.05, 0.05, { c: 0x4d3220 });
+  // goods
+  const gy = 0.97, gz = d / 2 - 0.35;
+  if (o.goods === 'cloth') {
+    for (let i = 0; i < 5; i++) k.cyl('cloth', 0.11, 0.11, 0.55, -0.85 + i * 0.4, gy, gz + (i % 2) * 0.12, 6, { c: DYES[(i + o.off) % DYES.length], rz: Math.PI / 2 * 0, caps: 'both', ao: false });
+    k.quad('cloth', [-0.5, 2.0, -d / 2 + 0.05], [0.5, 2.0, -d / 2 + 0.05], [0.4, 1.0, -d / 2 + 0.05], [-0.4, 1.0, -d / 2 + 0.05], { c: DYES[(o.off + 1) % DYES.length], ao: false });
+  } else if (o.goods === 'fruit') {
+    for (let i = 0; i < 3; i++) {
+      k.box('planks', 0.55, 0.16, 0.5, -0.7 + i * 0.7, gy, gz, { c: 0xb08658, nb: true });
+      for (let j = 0; j < 6; j++) k.sph('flat', 0.075, 0.075, 0.075, -0.7 + i * 0.7 + ((j % 3) - 1) * 0.15, gy + 0.2, gz + (j > 2 ? 0.1 : -0.1), 4, 2, { c: [0xc2243e, 0x78a850, 0xf2a030][i], ao: false });
+    }
+  } else if (o.goods === 'pots') {
+    for (let i = 0; i < 5; i++) {
+      k.cyl('flat', 0.12 - (i % 2) * 0.02, 0.09, 0.22 + (i % 3) * 0.05, -0.85 + i * 0.42, gy, gz + (i % 2) * 0.1, 7, { c: [0xb86a44, 0x9a5a3a, 0xc88458][i % 3], caps: 'none', ao: false });
+    }
+    for (let i = 0; i < 3; i++) k.sph('flat', 0.15, 0.13, 0.15, 0.45 + i * 0.28, 0.13, d / 2 + 0.4, 5, 3, { c: 0xb86a44, ao: false });
+  } else {
+    for (let i = 0; i < 6; i++) k.sph('flat', 0.13, 0.07, 0.07, -0.8 + i * 0.32, gy + 0.07, gz + (i % 2) * 0.1, 5, 3, { c: 0xd9a050, ao: false });
+    for (let i = 0; i < 3; i++) k.bar('flat', [-0.6 + i * 0.6, 2.0, -d / 2 + 0.1], [-0.6 + i * 0.6, 1.5, -d / 2 + 0.1], 0.03, 0.03, { c: 0xb8a070 });
+    for (let i = 0; i < 3; i++) k.cone('flat', 0.1, 0.35, -0.6 + i * 0.6, 1.15, -d / 2 + 0.1, 5, { c: 0xa86a3a, rx: Math.PI, caps: 'none', ao: false });
+  }
+  k.pop();
+}
+
+function market(k, st) {
+  // cobbled square
+  k.cyl('cobble', 5.3, 5.2, 0.07, 0, 0, 0, 14, { c: 0xd8cfba, caps: 'top', j: 0.03 });
+  well(k, 0, 0);
+  const specs = [
+    { ang: 0.55, c1: 0xb83a30, c2: 0xf1e8d2, goods: 'cloth', off: 0 },
+    { ang: 2.15, c1: 0x2f5a9a, c2: 0xf1e8d2, goods: 'fruit', off: 1 },
+    { ang: 3.75, c1: 0x4f8a48, c2: 0xf1e8d2, goods: 'pots', off: 2 },
+    { ang: 5.35, c1: 0xd9a432, c2: 0xf1e8d2, goods: 'bread', off: 3 },
+  ];
+  for (const s of specs) {
+    const R = 3.55;
+    const x = Math.sin(s.ang) * R, z = Math.cos(s.ang) * R;
+    stall(k, x, z, s.ang + Math.PI, s);
+  }
+  // goods on the ground between the stalls
+  crate(k, 1.6, 1.5, 0, 0.9, 0.4);
+  crate(k, 1.6, 1.5, 0.5, 0.8, 0.9);
+  barrel(k, -1.7, 1.6, 0, 0.9);
+  barrel(k, -2.0, 1.2, 0, 0.8);
+  sack(k, -1.5, -1.9, 0, 0xdad0b0);
+  sack(k, -1.9, -1.6, 0, 0xcdb98a, 0.9);
+  k.cyl('cloth', 0.2, 0.2, 0.6, 1.8, 0.2, -1.8, 6, { c: 0x2f5a9a, rz: Math.PI / 2, ao: false });
+  cart(k, 0.4, -4.6, 0.4, 'sacks');
+  // banner pole and lanterns
+  k.box('timber', 0.12, 3.4, 0.12, 0, 0, 1.4, { c: 0x4d3220 });
+  banner(k, 0.0, 1.5, 1.5, 0.6, 1.5, 0xa9362e, 0);
+  lanternAt(k, 0, 3.0, 1.4, 0.25);
+  bench(k, 4.6, 0.2, Math.PI / 2, 1.0);
+  bench(k, -4.6, -0.5, Math.PI / 2, 1.0);
+}
+
+// ---------------------------------------------------------------- house level 5 (manor)
+
+function topiary(k, x, z, s = 1) {
+  k.cyl('timber', 0.06 * s, 0.07 * s, 0.35 * s, x, 0, z, 5, { c: 0x5b3b25, caps: 'none' });
+  k.cone('flat', 0.32 * s, 0.7 * s, x, 0.3 * s, z, 6, { c: 0x4f8038, caps: 'none', j: 0.1 });
+  k.cone('flat', 0.24 * s, 0.5 * s, x, 0.75 * s, z, 6, { c: 0x5f9040, caps: 'none', j: 0.1 });
+  k.sph('flat', 0.12 * s, 0.12 * s, 0.12 * s, x, 1.28 * s, z, 5, 3, { c: 0x6fa24a });
+}
+
+function hedge(k, x, z, len, ry = 0) {
+  k.push(x, 0, z, ry);
+  k.box('flat', len, 0.4, 0.3, 0, 0, 0, { c: 0x4a7a38, nb: true, j: 0.1 });
+  for (let i = 0; i < Math.round(len / 0.4); i++) {
+    k.sph('flat', 0.17, 0.12, 0.17, -len / 2 + 0.2 + i * 0.4, 0.4, 0, 4, 2, { c: k.r.pick(GREENS), j: 0.1 });
+  }
+  k.pop();
+}
+
+function fountain(k, x, z) {
+  k.push(x, 0, z, 0);
+  k.cyl('stone', 0.75, 0.7, 0.4, 0, 0, 0, 10, { c: 0xd8d0be, caps: 'none' });
+  k.cyl('stone', 0.82, 0.82, 0.08, 0, 0.4, 0, 10, { c: 0xc7bfae, caps: 'top' });
+  k.disc('flat', 0.68, 0, 0.36, 0, 10, { c: 0x3c7a9a, ao: false });
+  k.cyl('stone', 0.14, 0.1, 0.9, 0, 0.35, 0, 6, { c: 0xd8d0be });
+  k.cyl('stone', 0.32, 0.12, 0.12, 0, 1.05, 0, 8, { c: 0xd0c8b6 });
+  k.sph('flat', 0.14, 0.18, 0.14, 0, 1.2, 0, 5, 3, { c: 0x8ac4d8, ao: false });
+  k.pop();
+}
+
+function houseLevel5(k, st) {
+  const tc = st.timber;
+  const stoneT = 0xe6dfcf;
+  const slate = 0xd4d8e2;
+  const w = 3.9, d = 2.8, h1 = 2.2, h2 = 1.85, y0 = 0.32;
+  const X = 0.55;
+  // ---- main hall
+  k.push(X, 0, 0, 0);
+  plinth(k, w, d, y0, 0, 0, 0xb4ae9c);
+  storey(k, {
+    w, d, h: h1, y: y0, mat: 'stone', tint: stoneT, st,
+    f: [
+      { t: 'door', x: 0, w: 1.0, h: 1.85, arch: true },
+      { t: 'win', x: -1.3, y: 0.8, w: 0.6, h: 0.95, shut: false, sill: 'stone' },
+      { t: 'win', x: 1.3, y: 0.8, w: 0.6, h: 0.95, shut: false },
+      { t: 'lantern', x: -0.8, y: 1.8 }, { t: 'lantern', x: 0.8, y: 1.8 },
+    ],
+    r: [{ t: 'win', x: 0, y: 0.85, w: 0.6, h: 0.95, shut: false }],
+    l: [],
+    b: [{ t: 'win', x: -0.8, y: 0.85, w: 0.6, h: 0.95 }, { t: 'win', x: 0.8, y: 0.85, w: 0.6, h: 0.95 }],
+  });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    for (let i = 0; i < 5; i++) {
+      const wq = i % 2 ? 0.34 : 0.46;
+      k.box('stone', wq, 0.34, wq, sx * w / 2, y0 + i * 0.42, sz * d / 2, { c: 0xf0ead8 });
+    }
+  }
+  k.box('stone', w + 0.2, 0.16, d + 0.2, 0, y0 + h1, 0, { c: 0xcfc8b6, nb: true });
+  const yb = y0 + h1 + 0.16;
+  storey(k, {
+    w, d, h: h2 - 0.16, y: yb, tint: st.plaster, frame: true, tc, st, sp: 0.95,
+    f: [
+      { t: 'win', x: -1.3, y: 0.5, w: 0.58, h: 0.85, shut: true, flowers: true },
+      { t: 'win', x: 0, y: 0.5, w: 0.58, h: 0.85, shut: true, flowers: true },
+      { t: 'win', x: 1.3, y: 0.5, w: 0.58, h: 0.85, shut: true, flowers: true },
+    ],
+    r: [{ t: 'win', x: 0, y: 0.5, w: 0.55, h: 0.8, shut: true }], l: [],
+    b: [{ t: 'win', x: -0.8, y: 0.5, w: 0.55, h: 0.8, shut: true }, { t: 'win', x: 0.8, y: 0.5, w: 0.55, h: 0.8, shut: true }],
+  });
+  // gold balcony rail over the porch door
+  const top = yb + h2 - 0.16;
+  const R = 1.75;
+  const roof = gableRoof(k, { w, d, y: top, type: 'slate', R, ox: 0.28, oz: 0.34, tint: slate, fill: { key: 'plaster', tint: st.plaster }, tc });
+  for (const s of [-1, 1]) {
+    if (s === -1) continue; // the tower hides the left gable
+    k.push(s * w / 2, top, 0, s * Math.PI / 2);
+    gableFrame(k, d, R, tc);
+    k.pop();
+  }
+  for (const x of [-1.0, 1.0]) {
+    dormerAt(k, { x, y0: top, zf: d / 2 - 0.12, d, R, t: roof.t, type: 'slate', tint: slate, wallTint: st.plaster, shut: st.shut, tc });
+  }
+  gableChimney(k, 1, w, 0.2, top + 0.1, top + R + 0.05, 0xe6dfcf);
+  k.pop();
+  // ---- tower on the left, slightly proud of the front
+  const tx = -2.0, tz = 0.75, tw = 1.9, th = 5.1;
+  storey(k, {
+    w: tw, d: tw, h: th, y: y0, x: tx, z: tz, mat: 'stone', tint: stoneT, st,
+    f: [
+      { t: 'door', x: 0.0, w: 0.7, h: 1.4, arch: true, step: false },
+      { t: 'fn', fn: (kk) => archWindowAt(kk, 0, 2.5, 0.5, 1.0, { pointed: true }) },
+      { t: 'fn', fn: (kk) => slitAt(kk, 0, 4.0, 0.7) },
+    ],
+    r: [{ t: 'fn', fn: (kk) => slitAt(kk, 0, 1.2) }, { t: 'fn', fn: (kk) => slitAt(kk, 0, 3.4) }],
+    l: [{ t: 'fn', fn: (kk) => slitAt(kk, 0, 1.2) }, { t: 'fn', fn: (kk) => slitAt(kk, 0, 3.4) }],
+    b: [{ t: 'fn', fn: (kk) => slitAt(kk, 0, 2.2) }],
+  });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    for (let i = 0; i < 9; i++) {
+      const wq = i % 2 ? 0.3 : 0.4;
+      k.box('stone', wq, 0.34, wq, tx + sx * tw / 2, y0 + i * 0.55, tz + sz * tw / 2, { c: 0xf0ead8 });
+    }
+  }
+  const tTop = y0 + th;
+  k.box('stone', tw + 0.4, 0.22, tw + 0.4, tx, tTop, tz, { c: 0xcfc8b6, nb: true });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    k.box('stone', 0.34, 0.3, 0.34, tx + sx * (tw / 2 + 0.05), tTop + 0.22, tz + sz * (tw / 2 + 0.05), { c: 0xd8d1c0 });
+  }
+  k.pyr('slate', tw + 0.55, tw + 0.55, 2.5, tx, tTop + 0.22, tz, { c: slate });
+  k.bar('flat', [tx, tTop + 2.7, tz], [tx, tTop + 3.5, tz], 0.04, 0.04, { c: IRON });
+  k.sph('flat', 0.09, 0.09, 0.09, tx, tTop + 2.72, tz, 4, 3, { c: GOLD, ao: false });
+  const pg = newGeo();
+  tri(pg, [tx, tTop + 3.5, tz], [tx, tTop + 3.1, tz], [tx + 0.65, tTop + 3.3, tz + 0.02]);
+  k.geo('cloth', pg, 0, 0, 0, 0, { c: 0xa9362e, ao: false });
+  // ---- gabled porch over the door
+  const pz = 1.4 + 0.55;
+  for (const sx of [-1, 1]) k.box('stone', 0.22, 2.3, 0.22, X + sx * 0.78, 0, pz + 0.5, { c: 0xd8d1c0 });
+  k.box('timber', 1.9, 0.16, 0.24, X, 2.3, pz + 0.5, { c: tc });
+  gableRoof(k, { w: 1.3, d: 1.9, y: 2.46, x: X, z: pz, ry: Math.PI / 2, type: 'slate', R: 0.8, ox: 0.12, oz: 0.2, tint: slate, fill: { key: 'plaster', tint: st.plaster }, tc });
+  k.box('stone', 1.6, 0.12, 1.0, X, 0, pz, { c: 0xcfc8b6, nb: true });
+  // ---- garden
+  k.box('cobble', 0.95, 0.05, 2.3, X, 0, 3.15, { c: 0xd8d0be, nb: true });
+  fountain(k, X, 4.0);
+  topiary(k, X - 1.1, 2.9, 1.0);
+  topiary(k, X + 1.1, 2.9, 1.0);
+  hedge(k, X - 1.9, 2.35, 1.6, 0);
+  hedge(k, X + 1.9, 2.35, 1.6, 0);
+  flowerBed(k, X - 1.55, 3.5, 1.0, 0.45);
+  flowerBed(k, X + 1.55, 3.5, 1.0, 0.45);
+  flowerBed(k, tx, 2.35, 1.0, 0.4);
+  for (const sx of [-1, 1]) {
+    k.box('stone', 0.28, 1.1, 0.28, X + sx * 0.7, 0, 4.9, { c: 0xd8d1c0 });
+    k.sph('stone', 0.15, 0.15, 0.15, X + sx * 0.7, 1.2, 4.9, 5, 3, { c: 0xd8d1c0 });
+  }
+  fence(k, X - 3.0, 4.9, X - 0.7, 4.9, 'picket', 0.6);
+  fence(k, X + 0.7, 4.9, X + 3.0, 4.9, 'picket', 0.6);
+  bench(k, X - 2.9, 3.6, Math.PI / 2, 1.0);
+  bush(k, X + 3.0, 1.2, 0.4);
+  barrel(k, X + 2.55, -1.6, 0, 0.9);
+  woodpile(k, X + 2.5, -0.5, Math.PI / 2, 0.9, 2);
+}
+
 // ---------------------------------------------------------------- scaffolding
 
 const POLE = 0x8a6a46;
@@ -2308,6 +3289,7 @@ function styleFor(seed) {
 
 const BUILDERS = {
   townhall, storehouse, woodcutter, forager, quarry, sawmill, farmhouse, mill, bakery, chapel, tavern,
+  fishery, hunter, herbalist, sheepfarm, ironmine, weaver, blacksmith, infirmary, market,
 };
 
 export function makeBuildingModel(type, { level = 1, stage = 0, seed = 0 } = {}) {
@@ -2315,8 +3297,8 @@ export function makeBuildingModel(type, { level = 1, stage = 0, seed = 0 } = {})
   const st = styleFor(seed);
   const k = new Kit(makeRng(seed * 1013 + 7 + type.length * 31 + (type.charCodeAt(0) | 0)));
   if (type === 'house') {
-    const lv = Math.max(1, Math.min(4, level | 0));
-    [houseLevel1, houseLevel2, houseLevel3, houseLevel4][lv - 1](k, st);
+    const lv = Math.max(1, Math.min(5, level | 0));
+    [houseLevel1, houseLevel2, houseLevel3, houseLevel4, houseLevel5][lv - 1](k, st);
   } else if (type === 'cathedral') {
     cathedral(k, Math.max(0, Math.min(4, stage | 0)), st);
   } else if (BUILDERS[type]) {
@@ -2330,6 +3312,7 @@ export function makeBuildingModel(type, { level = 1, stage = 0, seed = 0 } = {})
   k.bake(g);
   g.userData.chimneys = k.tops;
   g.userData.triangles = k.triCount();
+  if (k.pen) g.userData.pen = k.pen;
   return g;
 }
 

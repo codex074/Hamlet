@@ -106,6 +106,8 @@ function boot() {
     requestUpgrade: (id) => (typeof sim.requestUpgrade === 'function' ? sim.requestUpgrade(state, id) : { ok: false, reason: 'ยังอัปเกรดไม่ได้' }),
     setAutoUpgrade: (id, on) => { if (typeof sim.setAutoUpgrade === 'function') sim.setAutoUpgrade(state, id, on); },
     closeInfo: () => tools && tools.deselect(),
+    selectVillager: (id) => tools && tools.selectVillager(id),
+    selectBuilding: (id) => tools && tools.selectBuilding(id),
     saveGame: save,
     newGame: () => {
       skipSave = true;

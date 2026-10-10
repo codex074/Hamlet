@@ -1,4 +1,4 @@
-// Nature: trees / rocks / berry bushes (resource nodes) and instanced ground detail (grass, flowers, pebbles).
+// Nature: trees / rocks / iron ore outcrops / berry bushes (resource nodes) and instanced ground detail (grass, flowers, pebbles).
 // Everything is procedural, vertex-coloured, instanced and wind-swayed in the vertex shader.
 // Node-safe: no `document` and no WebGL needed at import time.
 import * as THREE from '../../vendor/three.module.js';
@@ -310,6 +310,56 @@ function rockC() { // tall angular outcrop
   return finish(b);
 }
 
+
+// ------------------------------------------------------------------ iron ore outcrops
+
+const ORE_BASE = [C(0x7a746f), C(0x857e78), C(0x6b6662)];
+const ORE_RUST = [C(0xb8581e), C(0xcf7a2a), C(0xa04a20)];
+const ORE_DARK = C(0x35302f);
+const ORE_GLINT = C(0xe08a3c);
+
+function addOreRock(b, { detail = 1, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1, ry = 0, seed = 0, jitter = 0.2, flat = -0.5, tone = 0, rust = 1 }) {
+  const geo = new THREE.IcosahedronGeometry(1, detail);
+  lump(geo, jitter, seed);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) if (p.getY(i) < flat) p.setY(i, flat);
+  const col = new THREE.Color();
+  addPart(b, geo, compose(x, y, z, sx, sy, sz, ry), (cx, cy, cz, nx, ny) => {
+    const h = hash3(cx * 5, cy * 5, cz * 5, seed);
+    col.copy(ORE_BASE[tone % 3]).multiplyScalar(0.8 + 0.36 * h);
+    // slanted mineral veins: bands tilted across the outcrop
+    const band = Math.sin((cy - y) * 7.5 + (cx - x) * 2.6 + (cz - z) * 1.7 + seed * 2.1);
+    const band2 = Math.sin((cy - y) * 3.1 - (cx - x) * 3.4 + seed * 5.3);
+    if (band > 0.8 - 0.2 * rust) col.lerp(ORE_RUST[Math.floor(h * 2.99)], 0.6 + 0.35 * h);
+    else if (band < -0.88) col.lerp(ORE_DARK, 0.7);
+    else if (band2 > 0.95) col.lerp(ORE_DARK, 0.3);
+    if (h > 0.93) col.lerp(ORE_GLINT, 0.6);
+    col.lerp(C(0x4a4442), clamp(0.5 * (1 - (cy - y) / sy)) * 0.4); // darker low down
+    if (ny > 0.55 && h < 0.5) col.lerp(C(0x7b665a), 0.25); // dusty top
+    if (ny < -0.1) col.multiplyScalar(0.7);
+    return col;
+  }, 'flat', 0, true);
+}
+
+function oreA() { // rounded mound with a rusty seam and angular chunks around it
+  const b = createBuilder();
+  addOreRock(b, { x: 0, y: 0.6, sx: 1.2, sy: 0.95, sz: 1.0, ry: 0.4, seed: 11, jitter: 0.2, flat: -0.6 });
+  addOreRock(b, { detail: 0, x: 0.2, y: 1.05, z: -0.1, sx: 0.6, sy: 0.55, sz: 0.55, ry: 0.9, seed: 12, tone: 1, jitter: 0.24, flat: -0.4 });
+  addOreRock(b, { detail: 0, x: 1.15, y: 0.26, z: 0.5, sx: 0.48, sy: 0.36, sz: 0.44, ry: 1.3, seed: 13, tone: 2, rust: 1.6, flat: -0.55 });
+  addOreRock(b, { detail: 0, x: -0.95, y: 0.2, z: -0.65, sx: 0.4, sy: 0.3, sz: 0.36, ry: 2.2, seed: 14, tone: 0, rust: 1.6, flat: -0.55 });
+  addOreRock(b, { detail: 0, x: -0.5, y: 0.14, z: 0.95, sx: 0.28, sy: 0.22, sz: 0.3, ry: 0.5, seed: 15, tone: 1, rust: 1.8, flat: -0.5 });
+  return finish(b);
+}
+
+function oreB() { // tall jagged outcrop leaning over a low shelf
+  const b = createBuilder();
+  addOreRock(b, { x: 0, y: 0.78, sx: 0.85, sy: 1.2, sz: 0.8, ry: 0.2, seed: 21, jitter: 0.25, flat: -0.7, tone: 1 });
+  addOreRock(b, { detail: 0, x: 0.7, y: 0.42, z: 0.15, sx: 0.58, sy: 0.7, sz: 0.5, ry: 1.0, seed: 22, tone: 0, rust: 1.4, flat: -0.6 });
+  addOreRock(b, { detail: 0, x: -0.6, y: 0.3, z: 0.5, sx: 0.55, sy: 0.45, sz: 0.5, ry: 2.0, seed: 23, tone: 2, flat: -0.6 });
+  addOreRock(b, { detail: 0, x: 0.1, y: 0.16, z: -0.95, sx: 0.5, sy: 0.3, sz: 0.4, ry: 0.4, seed: 24, tone: 1, rust: 1.7, flat: -0.5 });
+  return finish(b);
+}
+
 // ------------------------------------------------------------------ berry bush
 
 const BUSH_BLOBS = [
@@ -435,6 +485,7 @@ export function createNodesView(parent, terrain) {
   const treeCap = Math.ceil(NODE_COUNTS.tree * 1.3) + 32;
   const rockCap = Math.ceil(NODE_COUNTS.rock * 1.3) + 32;
   const berryCap = Math.ceil(NODE_COUNTS.berry * 1.3) + 32;
+  const oreCap = Math.ceil((NODE_COUNTS.ore || 14) * 1.3) + 16;
 
   const treeMat = makeVegMaterial({ amp: 0.12, height: 5.2 });
   const bushMat = makeVegMaterial({ amp: 0.05, height: 1.0 });
@@ -465,6 +516,10 @@ export function createNodesView(parent, terrain) {
     mk('rocks-b', rockB(), rockMat, rockCap),
     mk('rocks-c', rockC(), rockMat, rockCap),
   ];
+  const oreMeshes = [
+    mk('ore-a', oreA(), rockMat, oreCap),
+    mk('ore-b', oreB(), rockMat, oreCap),
+  ];
   const bushMesh = mk('bushes', bushGeometry(), bushMat, berryCap);
   const berryGeo = berryGeometry();
   const fillAttr = new THREE.InstancedBufferAttribute(new Float32Array(berryCap), 1);
@@ -492,6 +547,7 @@ export function createNodesView(parent, terrain) {
   function refresh(nodes) {
     const tc = [0, 0, 0, 0];
     const rc = [0, 0, 0];
+    const oc = [0, 0];
     let bc = 0;
     for (const n of nodes) {
       const h = heightAt(terrain, n.x, n.z);
@@ -527,6 +583,20 @@ export function createNodesView(parent, terrain) {
         mesh.setMatrixAt(i, m4);
         const t = 0.9 + rnd(n.id, 4) * 0.2;
         mesh.setColorAt(i, color.setRGB(t, t * 0.99, t * 0.96));
+      } else if (n.kind === 'ore') {
+        const v = Math.floor(rnd(n.id, 10) * 2) % 2;
+        const mesh = oreMeshes[v];
+        const i = oc[v];
+        if (i >= oreCap) continue;
+        oc[v]++;
+        const s = (0.85 + rnd(n.id, 1) * 0.45) * (0.6 + 0.4 * Math.min(1, n.amount / NODE_AMOUNT.ore));
+        q.setFromAxisAngle(pv.set(0, 1, 0), yaw);
+        pv.set(n.x, h - 0.1, n.z);
+        sv.set(s, s * (0.85 + rnd(n.id, 3) * 0.3), s);
+        m4.compose(pv, q, sv);
+        mesh.setMatrixAt(i, m4);
+        const t = 0.92 + rnd(n.id, 4) * 0.16;
+        mesh.setColorAt(i, color.setRGB(t, t, t));
       } else if (n.kind === 'berry') {
         if (bc >= berryCap) continue;
         const ratio = clamp(n.amount / BERRY_MAX);
@@ -548,6 +618,7 @@ export function createNodesView(parent, terrain) {
     }
     treeMeshes.forEach((m, i) => { m.count = tc[i]; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
     rockMeshes.forEach((m, i) => { m.count = rc[i]; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
+    oreMeshes.forEach((m, i) => { m.count = oc[i]; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
     for (const m of [bushMesh, berryMesh]) {
       m.count = bc;
       m.instanceMatrix.needsUpdate = true;
@@ -562,7 +633,7 @@ export function createNodesView(parent, terrain) {
 
   function signature(nodes) {
     let s = nodes.length;
-    for (const n of nodes) s = (s * 31 + n.id * 7 + Math.round(n.amount * 8) + (n.kind === 'tree' ? 1 : n.kind === 'rock' ? 2 : 3)) % 1000000007;
+    for (const n of nodes) s = (s * 31 + n.id * 7 + Math.round(n.amount * 8) + (n.kind === 'tree' ? 1 : n.kind === 'rock' ? 2 : n.kind === 'ore' ? 4 : 3)) % 1000000007;
     return s;
   }
 
@@ -579,7 +650,7 @@ export function createNodesView(parent, terrain) {
   }
 
   function dispose() {
-    for (const m of [...treeMeshes, ...rockMeshes, bushMesh, berryMesh]) { root.remove(m); m.dispose(); }
+    for (const m of [...treeMeshes, ...rockMeshes, ...oreMeshes, bushMesh, berryMesh]) { root.remove(m); m.dispose(); }
     geometries.forEach((g) => g.dispose());
     mats.forEach((m) => m.dispose());
     rockMat.dispose();

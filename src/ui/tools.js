@@ -22,6 +22,7 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
 
   let current = null;      // active tool descriptor
   let selectedId = null;   // selected building id (no-tool mode)
+  let selectedVid = null;  // selected villager id (no-tool mode)
 
   // build tool
   let ghost = null;
@@ -156,8 +157,44 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
 
   function clearSelection() {
     selectedId = null;
+    selectedVid = null;
     worldView.setHighlight(null);
+    worldView.setHighlightVillager?.(null);
     hud.showInfo(null, getState());
+  }
+
+  function selectBuilding(id) {
+    const state = getState();
+    const b = id == null ? null : state.buildings.find((bb) => bb.id === id);
+    if (!b) return;
+    selectedVid = null;
+    worldView.setHighlightVillager?.(null);
+    selectedId = b.id;
+    worldView.setHighlight(b.id);
+    hud.showInfo(b, state);
+  }
+
+  function selectVillager(id) {
+    const state = getState();
+    if (id == null || !state.villagers.some((v) => v.id === id)) return;
+    selectedId = null;
+    worldView.setHighlight(null);
+    selectedVid = id;
+    worldView.setHighlightVillager?.(id);
+    hud.showVillager?.(id);
+  }
+
+  // Villager under the pointer: world ray pick, else nearest to the ground point.
+  function pickVillagerId(state) {
+    if (typeof worldView.pickVillager === 'function') {
+      const id = worldView.pickVillager(raycaster);
+      return id == null ? null : id;
+    }
+    if (ground && typeof sim.villagerAt === 'function') {
+      const v = sim.villagerAt(state, ground.x, ground.z, 1.5);
+      return v ? v.id : null;
+    }
+    return null;
   }
 
   // ---------- tool lifecycle ----------
@@ -176,7 +213,7 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     current = tool || null;
     cameraController.setPanWithLeftMouse(!current);
     if (current) {
-      if (selectedId != null) clearSelection();
+      if (selectedId != null || selectedVid != null) clearSelection();
       if (current.kind === 'build') {
         createGhost(current.type);
         const r = buildRingRadius(current.type);
@@ -321,14 +358,14 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     }
     if (e.button === 0 && !current && isClick) {
       setPointer(e);
-      const id = worldView.pickBuilding(raycaster);
       const state = getState();
+      const vid = pickVillagerId(state);
+      if (vid != null) { selectVillager(vid); return; }
+      const id = worldView.pickBuilding(raycaster);
       const b = id == null ? null : state.buildings.find((bb) => bb.id === id);
       if (b) {
-        selectedId = b.id;
-        worldView.setHighlight(b.id);
-        hud.showInfo(b, state);
-      } else if (selectedId != null) {
+        selectBuilding(b.id);
+      } else if (selectedId != null || selectedVid != null) {
         clearSelection();
       }
     }
@@ -338,7 +375,7 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     switch (e.code) {
       case 'Escape':
         if (current) { select(null); return true; }
-        if (selectedId != null) { clearSelection(); return true; }
+        if (selectedId != null || selectedVid != null) { clearSelection(); return true; }
         return false;
       case 'KeyR':
         if (current && current.kind === 'build') {
@@ -378,6 +415,11 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
       worldView.setHighlight(null);
       hud.showInfo(null, state);
     }
+    if (selectedVid != null && !state.villagers.some((v) => v.id === selectedVid)) {
+      selectedVid = null;
+      worldView.setHighlightVillager?.(null);
+      hud.showInfo(null, state);
+    }
     if (!current || !pointer.has) return;
     evalTimer += dt;
     if (evalTimer >= EVAL_INTERVAL) {
@@ -400,6 +442,11 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     onPointerLeave,
     onKey,
     onWheel,
-    deselect() { if (selectedId != null) { selectedId = null; worldView.setHighlight(null); } },
+    selectBuilding,
+    selectVillager,
+    deselect() {
+      if (selectedId != null) { selectedId = null; worldView.setHighlight(null); }
+      if (selectedVid != null) { selectedVid = null; worldView.setHighlightVillager?.(null); }
+    },
   };
 }

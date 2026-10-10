@@ -214,6 +214,9 @@ export function createHUD(root, handlers = {}) {
   const sickEl = el('span', 'sick', '');
   sickEl.hidden = true;
   popChip.chip.appendChild(sickEl);
+  let popHover = false;
+  popChip.chip.addEventListener('mouseenter', () => { popHover = true; showPopTip(); });
+  popChip.chip.addEventListener('mouseleave', () => { popHover = false; hideTip(); });
   addChip('happy', '😊', 'ความสุขเฉลี่ย');
   addChip('clock', '☀️', 'เวลา', 'clock');
 
@@ -231,6 +234,23 @@ export function createHUD(root, handlers = {}) {
     tipEl.style.top = `${top}px`;
   }
   function hideTip() { tipEl.classList.remove('show'); }
+
+  // Population breakdown (families spec §10); counts a missing field as unknown.
+  function popTipHtml() {
+    const s = lastSummary || {};
+    const pop = s.pop || 0;
+    const has = (k) => typeof s[k] === 'number';
+    let h = `<b>ประชากร ${pop}</b>`;
+    if (has('children') || has('elders')) {
+      const ch = s.children || 0, el2 = s.elders || 0;
+      h += `<br>ผู้ใหญ่ ${Math.max(0, pop - ch - el2)} · เด็ก ${ch} · ผู้สูงอายุ ${el2}`;
+      h += `<br>ตั้งครรภ์ ${s.pregnant || 0}`;
+    }
+    if (has('births') || has('deaths')) h += `<br>เกิดทั้งหมด ${s.births || 0} · เสียชีวิต ${s.deaths || 0}`;
+    h += `<br><span class="dim">ที่อยู่อาศัยรองรับ ${s.housing != null ? s.housing : '-'} · ไร้บ้าน ${s.homeless || 0}</span>`;
+    return h;
+  }
+  function showPopTip() { showTip(popTipHtml(), nums.pop.chip); }
 
   // ===== build bar =====
   const toolButtons = []; // { btn, id, tab, type?, costs:[{span,res,n}], locked }
@@ -431,9 +451,11 @@ export function createHUD(root, handlers = {}) {
   let infoBodyEl = null;
   let infoWkEl = null;
   let infoBodyHtml = '';
+  let infoVid = null;   // villager id when the panel shows a villager instead of a building
 
   function closeInfoPanel() {
     infoId = null;
+    infoVid = null;
     infoSig = '';
     infoEl.hidden = true;
     infoEl.textContent = '';
@@ -556,6 +578,137 @@ export function createHUD(root, handlers = {}) {
       }).join('');
   }
 
+  // ---------- families & villagers ----------
+  const STAGE_NAME = { child: 'เด็ก', adult: 'ผู้ใหญ่', elder: 'ผู้สูงอายุ' };
+  const STATUS_INFO = {
+    sick: ['🤒', 'ป่วย'], pregnant: ['🤰', 'ตั้งครรภ์'], sleeping: ['💤', 'หลับ'],
+    working: ['🔨', 'ทำงาน'], idle: ['🚶', 'ว่าง'], builder: ['🏗️', 'ช่างก่อสร้าง'],
+  };
+  const genderIcon = (g) => (g === 'f' ? '<span class="gf">♀</span>' : g === 'm' ? '<span class="gm">♂</span>' : '');
+  const ageText = (a) => `${Math.floor(Number(a) || 0)} ปี`;
+
+  function stageIcon(stage, gender) {
+    if (stage === 'child') return '👶';
+    if (stage === 'elder') return gender === 'f' ? '👵' : '👴';
+    return '';
+  }
+
+  // Icon string for a household row (stage + status).
+  function statusIcons(m) {
+    const st = Array.isArray(m.status) ? m.status : [];
+    let out = stageIcon(m.stage, m.gender);
+    for (const k of ['pregnant', 'sick', 'builder', 'working', 'sleeping']) {
+      if (st.includes(k)) out += STATUS_INFO[k][0];
+    }
+    return out;
+  }
+
+  const vLink = (id, text) => `<button type="button" class="lnk" data-vid="${Number(id)}">${esc(text)}</button>`;
+  const bLink = (id, text) => `<button type="button" class="lnk" data-bid="${Number(id)}">${esc(text)}</button>`;
+
+  function safeCall(fn, ...args) {
+    try { return typeof fn === 'function' ? fn(...args) : null; } catch (e) { return null; }
+  }
+
+  function familyHtml(b, state) {
+    const members = safeCall(sim.household, state, b.id);
+    if (!Array.isArray(members) || !members.length) return '';
+    const byId = new Map(((state && state.villagers) || []).map((v) => [v.id, v]));
+    let surname = '';
+    for (const m of members) {
+      const v = byId.get(m.id);
+      surname = (v && v.surname) || '';
+      if (!surname && m.fullName) surname = String(m.fullName).trim().split(/\s+/).slice(1).join(' ');
+      if (surname) break;
+    }
+    let h = `<div class="sub">👪 ครอบครัว${esc(surname)}</div><ul class="fam">`;
+    for (const m of members) {
+      const rel = m.relation && m.relation !== 'ผู้อาศัย' ? m.relation : '';
+      h += `<li>${genderIcon(m.gender)} ${vLink(m.id, m.fullName || m.name || `#${m.id}`)}
+        <span class="dim">${ageText(m.age)}${rel ? ` · ${esc(rel)}` : ''}</span> <span class="si">${statusIcons(m)}</span></li>`;
+    }
+    return h + '</ul>';
+  }
+
+  function villagerFallback(state, id) {
+    const v = ((state && state.villagers) || []).find((x) => x.id === id);
+    if (!v) return null;
+    const age = v.age != null ? v.age : 0;
+    return {
+      id: v.id, fullName: [v.name, v.surname].filter(Boolean).join(' ') || `ชาวบ้าน #${v.id}`, gender: v.gender,
+      age, stage: age < 14 ? 'child' : age >= 55 ? 'elder' : 'adult',
+      status: [v.sick ? 'sick' : null, v.pregnant ? 'pregnant' : null].filter(Boolean),
+      job: null, home: null, spouse: null, parents: [], children: [], grandchildren: [],
+    };
+  }
+
+  function villagerBody(vi, state) {
+    const stage = vi.stage || 'adult';
+    const sub = `${ageText(vi.age)} · ${STAGE_NAME[stage] || stage}`;
+    let h = `<div class="stat">${genderIcon(vi.gender)} ${esc(sub)} ${stageIcon(stage, vi.gender)}</div>`;
+    const chips = (vi.status || []).filter((k) => STATUS_INFO[k])
+      .map((k) => `<span class="chp ${k}">${STATUS_INFO[k][0]} ${STATUS_INFO[k][1]}</span>`).join('');
+    if (chips) h += `<div class="chps">${chips}</div>`;
+
+    const rows = [];
+    const buildingName = (t) => (BUILDINGS[t] && BUILDINGS[t].name) || t;
+    rows.push(['งาน', vi.job
+      ? bLink(vi.job.id, vi.job.name || buildingName(vi.job.type))
+      : `<span class="dim">${stage === 'child' ? 'ยังเด็ก' : 'ไม่มีงานประจำ'}</span>`]);
+    rows.push(['บ้าน', vi.home
+      ? bLink(vi.home.id, `บ้านระดับ ${vi.home.level || 1}`)
+      : '<span class="dim">ไร้บ้าน</span>']);
+    if (vi.spouse) rows.push(['คู่สมรส', vLink(vi.spouse.id, vi.spouse.name)]);
+    h += '<div class="vrows">' + rows.map(([k, v]) => `<div class="vr"><span class="dim">${k}</span><span>${v}</span></div>`).join('') + '</div>';
+
+    if ((vi.parents || []).length) {
+      h += '<div class="sub">พ่อแม่</div><div class="rels">'
+        + vi.parents.map((p) => (p.alive === false
+          ? `<span class="dim">${esc(p.name)} (เสียชีวิต)</span>` : vLink(p.id, p.name))).join('') + '</div>';
+    }
+    const kin = (title, arr) => ((arr || []).length
+      ? `<div class="sub">${title}</div><div class="rels">${arr.map((c) => `<span>${vLink(c.id, c.name)}<span class="dim"> ${ageText(c.age)}</span></span>`).join('')}</div>`
+      : '');
+    h += kin('ลูก', vi.children) + kin('หลาน', vi.grandchildren);
+    return h;
+  }
+
+  function buildVillagerShell(vi) {
+    infoEl.textContent = '';
+    const head = el('div', 'info-head');
+    head.appendChild(el('span', 'info-title', vi.fullName || vi.name || 'ชาวบ้าน'));
+    const x = el('button', 'x', '✕');
+    x.type = 'button';
+    x.title = 'ปิด (Esc)';
+    x.addEventListener('click', () => { closeInfoPanel(); call('closeInfo'); });
+    head.appendChild(x);
+    infoEl.appendChild(head);
+    infoWkEl = null;
+    infoBodyEl = el('div', 'info-body');
+    infoBodyEl.addEventListener('click', onInfoClick);
+    infoEl.appendChild(infoBodyEl);
+    infoBodyHtml = '';
+    infoEl.hidden = false;
+  }
+
+  function renderVillager(state) {
+    let vi = safeCall(sim.villagerInfo, state, infoVid);
+    if (!vi) vi = villagerFallback(state, infoVid);
+    if (!vi) { closeInfoPanel(); call('closeInfo'); return; }
+    const sig = `v${vi.id}|${vi.fullName}`;
+    if (sig !== infoSig) { infoSig = sig; buildVillagerShell(vi); }
+    const html = villagerBody(vi, state);
+    if (html !== infoBodyHtml) { infoBodyHtml = html; infoBodyEl.innerHTML = html; }
+  }
+
+  function showVillager(id) {
+    if (id == null) { if (infoVid != null) closeInfoPanel(); return; }
+    infoId = null;
+    infoVid = id;
+    infoSig = '';
+    if (lastState) renderVillager(lastState);
+  }
+
   function houseHtml(b, state) {
     const lvl = levelOf(b.level);
     const res = (b.residents || []).length;
@@ -574,6 +727,7 @@ export function createHUD(root, handlers = {}) {
     h += '</ul>';
     const foods = (b.foodsToday || []).map((f) => info(f).icon).join(' ');
     h += `<div class="sub">อาหารที่กินวันนี้</div><div>${foods || '<span class="dim">ยังไม่มี</span>'}</div>`;
+    h += familyHtml(b, state);
 
     if (b.upgrading) return h;   // progress bar is rendered by siteHtml
     const st = safeUpgradeStatus(state, b);
@@ -653,6 +807,12 @@ export function createHUD(root, handlers = {}) {
   }
 
   function onInfoClick(e) {
+    const lk = e.target.closest && e.target.closest('[data-vid],[data-bid]');
+    if (lk) {
+      if (lk.dataset.vid != null) call('selectVillager', Number(lk.dataset.vid));
+      else call('selectBuilding', Number(lk.dataset.bid));
+      return;
+    }
     const btn = e.target.closest && e.target.closest('[data-act]');
     if (!btn || btn.disabled) return;
     const b = findBuilding(lastState, infoId);
@@ -668,6 +828,7 @@ export function createHUD(root, handlers = {}) {
   }
 
   function renderInfo(state) {
+    if (infoVid != null) { renderVillager(state); return; }
     if (infoId == null) return;
     const b = findBuilding(state, infoId);
     if (!b) { closeInfoPanel(); call('closeInfo'); return; }
@@ -685,6 +846,7 @@ export function createHUD(root, handlers = {}) {
   function showInfo(building, state) {
     if (state) lastState = state;
     if (!building) { closeInfoPanel(); return; }
+    infoVid = null;
     infoId = building.id;
     infoSig = '';
     renderInfo(lastState || { buildings: [building], gold: 0 });
@@ -748,7 +910,7 @@ export function createHUD(root, handlers = {}) {
     const sick = summary.sick != null ? summary.sick : ((state && state.villagers) || []).filter((v) => v.sick).length;
     sickEl.hidden = !(sick > 0);
     setText(sickEl, sick > 0 ? ` 🤒 ${sick}` : '');
-    nums.pop.chip.title = `ประชากร ${summary.pop || 0} · ที่อยู่อาศัยรองรับ ${summary.housing != null ? summary.housing : '-'}`;
+    if (popHover) showPopTip();
     const h = summary.happiness != null ? summary.happiness : 1;
     setText(nums.happy.ic, happyFace(h));
     setText(nums.happy.num, `${Math.round(h * 100)}%`);
@@ -761,5 +923,5 @@ export function createHUD(root, handlers = {}) {
     renderInfo(state);
   }
 
-  return { update, showInfo, toast, setActiveTool, setSpeedDisplay };
+  return { update, showInfo, showVillager, toast, setActiveTool, setSpeedDisplay };
 }
