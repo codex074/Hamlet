@@ -144,6 +144,30 @@ test('villages: max 3, scoped per user, save round-trip', async () => {
   assert.equal((await alice('POST', '/api/villages', { name: 'สี่' })).status, 200);
 });
 
+test('village settings are whitelisted and returned; custom seed accepted', async () => {
+  const call = client();
+  await call('POST', '/api/register', { email: 'settings@example.com', password: 'secret123' });
+  const r = await call('POST', '/api/villages', {
+    name: 'ใหญ่', seed: 12345,
+    settings: { mapSize: 'large', forest: 'high', rivers: 2, startVillagers: 12, evil: '<script>', terrain: 'lava' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.village.seed, 12345);
+  const st = r.json.village.settings;
+  assert.equal(st.mapSize, 'large');
+  assert.equal(st.forest, 'high');
+  assert.equal(st.rivers, 2);
+  assert.equal(st.startVillagers, 12);
+  assert.equal(st.terrain, 'normal');          // invalid value → default
+  assert.equal('evil' in st, false);           // unknown key dropped
+  const got = await call('GET', `/api/villages/${r.json.village.id}/save`);
+  assert.equal(got.json.village.settings.mapSize, 'large');
+  const plain = await call('POST', '/api/villages', { name: 'เดิม' });
+  assert.equal(plain.json.village.settings, null);
+  const badSeed = await call('POST', '/api/villages', { name: 'x', seed: -5 });
+  assert.ok(badSeed.json.village.seed > 0);
+});
+
 test('villages require login', async () => {
   const anon = client();
   assert.equal((await anon('GET', '/api/villages')).status, 401);

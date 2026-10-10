@@ -49,7 +49,7 @@ if (params.get('looks')) {
 } else if (params.get('carry')) {
   entries = CARRY_KINDS.map((res, i) => ({ role: 'villager', look: i, carry: res }));
 } else {
-  const NEW = ['fisher', 'hunter', 'herbalist', 'shepherd', 'miner', 'weaver', 'blacksmith', 'doctor', 'merchant'];
+  const NEW = ['fisher', 'hunter', 'herbalist', 'shepherd', 'miner', 'weaver', 'blacksmith', 'doctor', 'merchant', 'forester'];
   const keys = params.get('set') === 'new' ? NEW : params.get('set') === 'old' ? Object.keys(ROLES).filter((k) => !NEW.includes(k)) : Object.keys(ROLES);
   entries = keys.map((role) => ({ role, look, carry: null }));
 }

@@ -40,7 +40,14 @@ export function openDb(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');
   db.exec(SCHEMA);
+  migrate(db);
   return makeQueries(db);
+}
+
+// Additive schema changes for databases created by older versions.
+function migrate(db) {
+  const cols = db.prepare('PRAGMA table_info(villages)').all().map((c) => c.name);
+  if (!cols.includes('settings')) db.exec('ALTER TABLE villages ADD COLUMN settings TEXT');
 }
 
 function makeQueries(db) {
@@ -61,13 +68,13 @@ function makeQueries(db) {
                     WHERE s.token_hash = ? AND s.expires_at > ?`),
     deleteSession: q('DELETE FROM sessions WHERE token_hash = ?'),
     purgeSessions: q('DELETE FROM sessions WHERE expires_at <= ?'),
-    listVillages: q(`SELECT id, name, seed, day, pop, created_at, updated_at, save_size
+    listVillages: q(`SELECT id, name, seed, day, pop, created_at, updated_at, save_size, settings
                      FROM villages WHERE user_id = ? ORDER BY id`),
     countVillages: q('SELECT COUNT(*) AS n FROM villages WHERE user_id = ?'),
-    village: q(`SELECT id, name, seed, day, pop, created_at, updated_at, save_size
+    village: q(`SELECT id, name, seed, day, pop, created_at, updated_at, save_size, settings
                 FROM villages WHERE id = ? AND user_id = ?`),
     villageSave: q('SELECT save FROM villages WHERE id = ? AND user_id = ?'),
-    insertVillage: q('INSERT INTO villages (user_id, name, seed, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'),
+    insertVillage: q('INSERT INTO villages (user_id, name, seed, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'),
     renameVillage: q('UPDATE villages SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?'),
     deleteVillage: q('DELETE FROM villages WHERE id = ? AND user_id = ?'),
     writeSave: q(`UPDATE villages SET save = ?, save_size = ?, day = ?, pop = ?, updated_at = ?
@@ -101,9 +108,9 @@ function makeQueries(db) {
     countVillages: (userId) => s.countVillages.get(userId).n,
     village: (id, userId) => s.village.get(id, userId),
     villageSave: (id, userId) => s.villageSave.get(id, userId)?.save ?? null,
-    createVillage: (userId, name, seed) => {
+    createVillage: (userId, name, seed, settings = null) => {
       const now = Date.now();
-      const r = s.insertVillage.run(userId, name, seed, now, now);
+      const r = s.insertVillage.run(userId, name, seed, settings ? JSON.stringify(settings) : null, now, now);
       return s.village.get(Number(r.lastInsertRowid), userId);
     },
     renameVillage: (id, userId, name) => s.renameVillage.run(name, Date.now(), id, userId).changes > 0,

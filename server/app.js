@@ -7,6 +7,7 @@ import {
   hashPassword, verifyPassword, burnPasswordCheck, newToken, hashToken,
   normalizeEmail, passwordProblem, cleanUsername, cleanVillageName,
 } from './auth.js';
+import { cleanSettings } from './settings.js';
 
 const SESSION_TTL = 30 * 24 * 3600 * 1000;
 const COOKIE = 'hamlet_sid';
@@ -78,6 +79,7 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
   const publicVillage = (v) => ({
     id: v.id, name: v.name, seed: v.seed, day: v.day, pop: v.pop,
     createdAt: v.created_at, updatedAt: v.updated_at, hasSave: v.save_size > 0,
+    settings: parseSettings(v.settings),
   });
 
   // State-changing requests: JSON only, and same-origin when the browser says where it came from.
@@ -202,7 +204,10 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
         const { value, error } = cleanVillageName(body.name);
         if (error) throw new HttpError(400, error);
         if (db.countVillages(user.id) >= MAX_VILLAGES) throw new HttpError(409, `มีหมู่บ้านครบ ${MAX_VILLAGES} แห่งแล้ว`);
-        return { village: publicVillage(db.createVillage(user.id, value, randomInt(1, 2 ** 31 - 1))) };
+        // settings are optional (older clients); when present they are whitelisted value by value
+        const settings = body.settings === undefined ? null : cleanSettings(body.settings);
+        const seed = Number.isSafeInteger(body.seed) && body.seed > 0 && body.seed < 2 ** 31 ? body.seed : randomInt(1, 2 ** 31 - 1);
+        return { village: publicVillage(db.createVillage(user.id, value, seed, settings)) };
       }
     }
 
@@ -335,6 +340,11 @@ export function ipKey(ip) {
   const t = v.includes('::') && tail ? tail.split(':') : [];
   const groups = v.includes('::') ? [...h, ...Array(8 - h.length - t.length).fill('0'), ...t] : h;
   return `ip6:${groups.slice(0, 4).map((g) => parseInt(g || '0', 16).toString(16)).join(':')}`;
+}
+
+function parseSettings(text) {
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return null; }
 }
 
 function clampInt(v, lo, hi, fallback) {

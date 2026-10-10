@@ -314,6 +314,16 @@ const ITEM_BUILDERS = {
     add(l, sph(0.018), 0xe8c050, 0.03, -0.01, 0.09);                                         // coin peeking out
     return merge(l);
   },
+  sapling: () => {
+    // a young tree in a clay pot, held in front
+    const l = [];
+    add(l, cyl(0.07, 0.05, 0.1), 0xa85a3a, 0, -0.1, 0.1);
+    add(l, cyl(0.072, 0.072, 0.015), 0x6b4a2c, 0, -0.05, 0.1);
+    add(l, cyl(0.008, 0.01, 0.3), 0x7a5232, 0, 0.1, 0.1);
+    add(l, sph(0.07), 0x5a9a3a, 0, 0.27, 0.1, 0, 0, 0, 1, 1.2, 1);
+    add(l, sph(0.05), 0x6aaa48, 0.05, 0.2, 0.12);
+    return merge(l);
+  },
   cane: () => {
     const l = [];
     add(l, cyl(0.018, 0.022, 0.92), 0x6b4a2c, 0, -0.42, 0.06);
@@ -599,6 +609,18 @@ export const ROLES = {
       add(l, torus(0.22, 0.012), 0x4a3320, 0, 1.13, 0, Math.PI / 2, 0.6, 0, 1, 0.86, 1);
     },
   },
+  forester: {
+    name: 'คนปลูกป่า', tunic: 0x5a6a3a, sleeve: 0x5a6a3a, trousers: 0x4a3a28, skirt: 0x4e5e34,
+    belt: 0x3a2716, apron: 0x7a6a4a, glove: 0x5c4630, item: 'sapling', workPose: 'tend',
+    extraHead(l) {
+      // wide brimmed felt hat with a sprig of leaves in the band
+      add(l, cyl(0.25, 0.25, 0.025), 0x4a5a2e, 0, 0.27, 0);
+      add(l, cyl(0.13, 0.16, 0.12), 0x4a5a2e, 0, 0.33, 0);
+      add(l, cyl(0.162, 0.162, 0.03), 0x3a2716, 0, 0.29, 0);
+      add(l, sph(0.035), 0x6aaa48, 0.14, 0.31, 0.05, 0, 0, 0, 0.6, 1.4, 0.6);
+      add(l, sph(0.03), 0x5a9a3a, 0.15, 0.33, 0.0, 0, 0, 0, 0.6, 1.3, 0.6);
+    },
+  },
   merchant: {
     name: 'พ่อค้า', tunic: 0x2e6a4a, sleeve: 0xc9a24a, trousers: 0x5a2a2a, skirt: 0x2e6a4a,
     belt: 0x5c3f25, cuff: 0xc9a24a, item: 'purse', workPose: 'tend',
@@ -618,7 +640,7 @@ export const JOB_ROLE = {
   woodcutter: 'woodcutter', forager: 'forager', quarry: 'quarry', sawmill: 'sawyer',
   farmhouse: 'farmer', mill: 'miller', bakery: 'baker', chapel: 'priest', tavern: 'innkeeper',
   fishery: 'fisher', hunter: 'hunter', herbalist: 'herbalist', sheepfarm: 'shepherd', ironmine: 'miner',
-  weaver: 'weaver', blacksmith: 'blacksmith', infirmary: 'doctor', market: 'merchant',
+  weaver: 'weaver', blacksmith: 'blacksmith', infirmary: 'doctor', market: 'merchant', forester: 'forester',
 };
 
 // Work animation per role (default 'chop').
