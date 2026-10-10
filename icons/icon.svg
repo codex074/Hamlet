@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b4f8c"/>
+      <stop offset="0.45" stop-color="#c9785a"/>
+      <stop offset="0.75" stop-color="#f2b25e"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff2c4"/>
+      <stop offset="0.6" stop-color="#ffd27a"/>
+      <stop offset="1" stop-color="#ffd27a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hillFar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6f8f4a"/>
+      <stop offset="1" stop-color="#4f6e36"/>
+    </linearGradient>
+    <linearGradient id="hillNear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fb556"/>
+      <stop offset="1" stop-color="#5d843a"/>
+    </linearGradient>
+    <linearGradient id="roof" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9583a"/>
+      <stop offset="1" stop-color="#9e3324"/>
+    </linearGradient>
+    <linearGradient id="roofDark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a83a28"/>
+      <stop offset="1" stop-color="#7a2618"/>
+    </linearGradient>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6e6c4"/>
+      <stop offset="1" stop-color="#e2c99a"/>
+    </linearGradient>
+    <linearGradient id="wallShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d8bd8a"/>
+      <stop offset="1" stop-color="#bfa071"/>
+    </linearGradient>
+    <linearGradient id="stone" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a39a8c"/>
+      <stop offset="1" stop-color="#7d7568"/>
+    </linearGradient>
+    <linearGradient id="slate" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5a6f9c"/>
+      <stop offset="1" stop-color="#3c4d78"/>
+    </linearGradient>
+  </defs>
+
+  <!-- sky + sun -->
+  <rect width="1024" height="1024" fill="url(#sky)"/>
+  <circle cx="742" cy="430" r="190" fill="url(#sun)"/>
+  <circle cx="742" cy="430" r="78" fill="#fff0c0"/>
+  <!-- soft clouds -->
+  <g fill="#f8e0c8" opacity="0.75">
+    <ellipse cx="230" cy="250" rx="120" ry="34"/><ellipse cx="300" cy="228" rx="80" ry="38"/>
+    <ellipse cx="820" cy="210" rx="90" ry="26"/><ellipse cx="870" cy="194" rx="56" ry="28"/>
+  </g>
+
+  <!-- hills -->
+  <path d="M0 640 C180 560 330 600 470 585 C640 565 820 520 1024 590 L1024 1024 L0 1024 Z" fill="url(#hillFar)"/>
+  <path d="M0 760 C200 690 390 720 560 705 C760 688 900 690 1024 730 L1024 1024 L0 1024 Z" fill="url(#hillNear)"/>
+  <!-- dirt path -->
+  <path d="M470 1024 C480 930 520 860 560 812 L620 812 C600 870 600 950 640 1024 Z" fill="#b4875a" opacity="0.9"/>
+
+  <!-- distant trees -->
+  <g fill="#3f6430">
+    <path d="M110 640 l34 -96 l34 96 z"/><path d="M160 636 l28 -78 l28 78 z"/>
+    <path d="M860 610 l30 -86 l30 86 z"/><path d="M905 616 l26 -70 l26 70 z"/>
+  </g>
+
+  <!-- bell tower (behind the hall) -->
+  <g>
+    <rect x="270" y="380" width="120" height="330" fill="url(#stone)"/>
+    <path d="M270 400 h120 M270 470 h120 M270 540 h120 M270 610 h120" stroke="#6b6458" stroke-width="5" opacity="0.6"/>
+    <path d="M300 470 a30 30 0 0 1 60 0 v52 h-60 z" fill="#2a2420"/>
+    <path d="M252 384 L330 236 L408 384 Z" fill="url(#slate)"/>
+    <rect x="326" y="160" width="8" height="84" fill="#5a4630"/>
+    <path d="M334 166 L410 186 L334 206 Z" fill="#d9302a"/>
+  </g>
+
+  <!-- main timber-framed hall -->
+  <g>
+    <!-- side wall in shade -->
+    <path d="M640 560 L760 520 L760 760 L640 800 Z" fill="url(#wallShade)"/>
+    <!-- front wall -->
+    <rect x="330" y="560" width="310" height="240" fill="url(#wall)"/>
+    <!-- stone plinth -->
+    <rect x="322" y="770" width="326" height="44" rx="6" fill="#8d8476"/>
+    <path d="M640 800 L760 760 L768 790 L648 830 Z" fill="#776f62"/>
+    <!-- timber frame -->
+    <g stroke="#4a3220" stroke-width="16" stroke-linecap="square" fill="none">
+      <path d="M330 560 V800 M485 560 V800 M640 560 V800 M330 680 H640"/>
+      <path d="M340 690 L475 790 M630 690 L495 790"/>
+    </g>
+    <path d="M700 560 V780" stroke="#3e2a1a" stroke-width="12"/>
+    <!-- windows with warm light -->
+    <g>
+      <rect x="370" y="592" width="74" height="66" rx="6" fill="#ffcf6a"/>
+      <rect x="526" y="592" width="74" height="66" rx="6" fill="#ffcf6a"/>
+      <path d="M407 592 V658 M370 625 H444 M563 592 V658 M526 625 H600" stroke="#4a3220" stroke-width="7"/>
+      <rect x="360" y="660" width="94" height="14" rx="4" fill="#6d8f3e"/>
+      <circle cx="378" cy="660" r="9" fill="#e0505a"/><circle cx="406" cy="658" r="9" fill="#f2c94c"/><circle cx="434" cy="660" r="9" fill="#e0505a"/>
+      <rect x="682" y="600" width="40" height="56" rx="5" fill="#e8b45a"/>
+    </g>
+    <!-- door -->
+    <path d="M452 800 V730 a33 33 0 0 1 66 0 V800 Z" fill="#6b4224"/>
+    <circle cx="507" cy="766" r="5" fill="#d9b25a"/>
+    <!-- roof -->
+    <path d="M300 572 L485 380 L670 572 Z" fill="url(#roof)"/>
+    <path d="M485 380 L790 352 L782 532 L670 572 Z" fill="url(#roofDark)"/>
+    <g stroke="#7a2618" stroke-width="6" opacity="0.55">
+      <path d="M362 508 H608 M410 458 H560 M450 418 H520"/>
+    </g>
+    <path d="M296 576 L485 378 L674 576" fill="none" stroke="#5c2a1c" stroke-width="12" stroke-linejoin="round"/>
+    <!-- chimney + smoke -->
+    <rect x="690" y="300" width="46" height="110" fill="#8a7f70"/>
+    <rect x="684" y="292" width="58" height="18" fill="#6f665a"/>
+    <g fill="#f4ede2" opacity="0.85">
+      <circle cx="716" cy="262" r="24"/><circle cx="742" cy="222" r="30"/><circle cx="782" cy="182" r="36"/>
+    </g>
+  </g>
+
+  <!-- foreground villager-ish haystack and fence -->
+  <g>
+    <path d="M150 860 C150 800 250 800 250 860 Z" fill="#e2b85a"/>
+    <path d="M160 846 h80" stroke="#b8902e" stroke-width="6"/>
+    <g stroke="#6b4a2c" stroke-width="10" stroke-linecap="round">
+      <path d="M760 890 V830 M830 905 V845 M900 920 V860 M745 860 L915 890"/>
+    </g>
+  </g>
+</svg>

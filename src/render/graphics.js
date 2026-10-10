@@ -21,7 +21,10 @@ export const GRAPHICS_OPTIONS = {
   pixelRatio: [1, 'auto'],
 };
 
-const DEFAULT = { preset: 'high', ...GRAPHICS_PRESETS.high, showFps: false };
+// Tablets and phones (coarse pointer) start on 'medium'; desktops on 'high'. Players can change it any time.
+const isTouchDevice = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+const DEFAULT_PRESET = isTouchDevice ? 'medium' : 'high';
+const DEFAULT = { preset: DEFAULT_PRESET, ...GRAPHICS_PRESETS[DEFAULT_PRESET], showFps: false };
 
 let current = null;
 const listeners = new Set();

@@ -19,11 +19,11 @@ const AUTH_LIMIT = { max: 10, windowMs: 10 * 60 * 1000 };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.txt': 'text/plain',
+  '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.txt': 'text/plain',
 };
 // Only these parts of the repo are public.
-const PUBLIC_DIRS = ['src', 'vendor'];
-const PUBLIC_FILES = ['index.html', 'privacy.html'];
+const PUBLIC_DIRS = ['src', 'vendor', 'icons'];
+const PUBLIC_FILES = ['index.html', 'privacy.html', 'manifest.webmanifest', 'sw.js'];
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }

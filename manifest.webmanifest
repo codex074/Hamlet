@@ -1,0 +1,20 @@
+{
+  "name": "Hamlet — หมู่บ้านยุคกลาง",
+  "short_name": "Hamlet",
+  "description": "เกมสร้างหมู่บ้านยุคกลางแบบ 3D — สร้างอิสระ สืบสานตระกูล",
+  "lang": "th",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#2b2118",
+  "theme_color": "#2b2118",
+  "categories": ["games"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

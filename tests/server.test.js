@@ -210,6 +210,11 @@ test('static: serves the game, blocks everything outside src/ vendor/ index.html
   assert.equal(index.status, 200);
   assert.match(index.headers.get('content-type'), /text\/html/);
   assert.equal((await call('GET', '/src/config.js')).status, 200);
+  const manifest = await call('GET', '/manifest.webmanifest');
+  assert.equal(manifest.status, 200);
+  assert.match(manifest.headers.get('content-type'), /manifest\+json/);
+  assert.equal((await call('GET', '/sw.js')).status, 200);
+  assert.equal((await call('GET', '/icons/icon-192.png')).status, 200);
   assert.equal((await call('GET', '/server/app.js')).status, 404);
   assert.equal((await call('GET', '/data/hamlet.db')).status, 404);
   assert.equal((await call('GET', '/.git/config')).status, 404);
