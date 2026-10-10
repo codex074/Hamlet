@@ -1,8 +1,11 @@
 // Villager AI: plans a task queue when idle, then executes it step by step. Pure: no DOM, no globals.
 import {
   HUNGER_PER_SEC, HUNGRY_AT, STARVING_AT, CARRY_MAX, GATHER_RADIUS, FIELD_RADIUS, IDLE_WANDER_RADIUS,
-  BUILDINGS, CATHEDRAL_STAGES, FOODS, UPGRADE_BUILD_TIME,
+  BUILDINGS, CATHEDRAL_STAGES, FOODS, UPGRADE_BUILD_TIME, DAY_LENGTH, CHILD_PLAY_RADIUS,
+  DEATH_AGE_MIN, DEATH_AGE_MAX,
 } from './config.js';
+import { mulberry32, randRange } from './rng.js';
+import { pickGivenName, pickSurname, fullName } from './names.js';
 import {
   distance, nearestStorage, nearestStorageWithAll, nearestFoodStorage, isStorage, addStock, takeStock,
 } from './economy.js';
@@ -10,7 +13,7 @@ import { fertilityAt } from './terrain.js';
 import { clock } from './needs.js';
 import {
   DONE, FAIL, WAIT_SECONDS, getBuilding, gotoPoint, gotoBuilding, firstEntry, planWait, countdown,
-  moveToward, workTime,
+  moveToward, workTime, canBuild, canTakeJob, stageOf,
 } from './taskutil.js';
 import { JOB_PLANNERS, JOB_EXEC } from './jobs.js';
 
@@ -36,10 +39,23 @@ export function buildTimeOf(b) {
   return BUILDINGS[b.type]?.buildTime || BUILD_CHUNK;
 }
 
-export function createVillager(state, x, z) {
+// opts (all optional): { gender, age, surname, name, parents }. Defaults to a random adult aged 18-40.
+// Randomness is derived from (seed, id) so creation stays deterministic without a rand argument.
+export function createVillager(state, x, z, opts = {}) {
+  const id = state.nextId++;
+  const rand = mulberry32((Math.imul((state.seed ?? 0) | 0, 2246822519) ^ Math.imul(id, 3266489917)) >>> 0);
+  const rGender = rand() < 0.5 ? 'm' : 'f';
+  const rAge = randRange(rand, 18, 40);
+  const rDeath = randRange(rand, DEATH_AGE_MIN, DEATH_AGE_MAX);
+  const gender = opts.gender ?? rGender;
+  const rName = pickGivenName(gender, rand);
+  const rSurname = pickSurname(rand);
   return {
-    id: state.nextId++, x, z, homeId: null, jobId: null, hunger: 0,
+    id, x, z, homeId: null, jobId: null, hunger: 0,
     carry: null, queue: [], res: {}, role: 'idle', sick: false, sickDays: 0, healer: null,
+    name: opts.name ?? rName, surname: opts.surname ?? rSurname, gender,
+    age: opts.age ?? rAge, deathAge: rDeath, spouseId: null, parents: [...(opts.parents ?? [])], children: [],
+    pregnant: false, pregnantDays: 0, pregnantBy: null,
   };
 }
 
@@ -64,6 +80,9 @@ export function removeVillager(state, id) {
   if (i < 0) return;
   const [v] = state.villagers.splice(i, 1);
   releaseReservations(state, v);
+  (state.departed ??= {})[id] = fullName(v);   // relatives can still show who they were
+  const spouse = v.spouseId != null ? state.villagers.find((w) => w.id === v.spouseId) : null;
+  if (spouse && spouse.spouseId === id) spouse.spouseId = null;
   for (const b of state.buildings) {
     b.workers = b.workers.filter((w) => w !== id);
     if (b.residents) b.residents = b.residents.filter((r) => r !== id);
@@ -233,11 +252,11 @@ function planBuild(state, v) {
   return true;
 }
 
-function planWander(state, v, rand) {
+function planWander(state, v, rand, radius = IDLE_WANDER_RADIUS) {
   const centre = getBuilding(state, v.homeId) ?? state.buildings.find((b) => b.type === 'townhall');
   const cx = centre ? centre.x : v.x;
   const cz = centre ? centre.z : v.z;
-  const rad = IDLE_WANDER_RADIUS * Math.sqrt(rand());
+  const rad = radius * Math.sqrt(rand());
   const ang = rand() * Math.PI * 2;
   v.queue.push(gotoPoint(cx + Math.cos(ang) * rad, cz + Math.sin(ang) * rad), { kind: 'wait', t: WAIT_SECONDS });
   v.role = 'idle';
@@ -255,14 +274,24 @@ export function planNext(state, v, rand) {
     return;
   }
   if (planSleep(state, v)) return;
-  if (v.jobId != null && planJob(state, v, rand)) return;
-  if (planHaul(state, v)) {
-    v.role = 'builder';
+  if (stageOf(v) === 'child') {   // children play near home
+    planWander(state, v, rand, Math.min(IDLE_WANDER_RADIUS, CHILD_PLAY_RADIUS));
     return;
   }
-  if (planBuild(state, v)) {
-    v.role = 'builder';
-    return;
+  if (v.jobId != null) {
+    const job = getBuilding(state, v.jobId);
+    if (job && !canTakeJob(v, job)) v.jobId = null;   // pregnant / too old for a heavy job
+    else if (planJob(state, v, rand)) return;
+  }
+  if (canBuild(v)) {
+    if (planHaul(state, v)) {
+      v.role = 'builder';
+      return;
+    }
+    if (planBuild(state, v)) {
+      v.role = 'builder';
+      return;
+    }
   }
   planWander(state, v, rand);
 }
@@ -406,6 +435,7 @@ const EXEC = {
 };
 
 export function stepVillager(state, v, dt, rand) {
+  v.age = (v.age ?? 30) + dt / DAY_LENGTH;
   v.hunger = Math.min(1, v.hunger + HUNGER_PER_SEC * dt);
   if (v.hunger >= STARVING_AT && v.homeId != null) {
     const home = getBuilding(state, v.homeId);

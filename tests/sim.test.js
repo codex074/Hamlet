@@ -15,7 +15,7 @@ import {
 
 test('createWorld basics', () => {
   const s = createWorld(1);
-  assert.equal(s.version, 2);
+  assert.equal(s.version, 3);
   const hall = townhall(s);
   assert.deepEqual([hall.x, hall.z, hall.built], [SPAWN.x, SPAWN.z, true]);
   assert.equal(s.villagers.length, START.villagers);
@@ -219,7 +219,9 @@ test('summary fields', () => {
   const s = world();
   const sum = summary(s);
   assert.deepEqual(Object.keys(sum).sort(),
-    ['day', 'gold', 'happiness', 'homeless', 'hour', 'housing', 'isNight', 'pop', 'sick', 'stock', 'unemployed']);
+    ['adults', 'births', 'children', 'day', 'deaths', 'elders', 'gold', 'happiness', 'homeless', 'hour',
+      'housing', 'isNight', 'pop', 'pregnant', 'sick', 'stock', 'unemployed']);
+  assert.deepEqual([sum.adults, sum.children, sum.elders, sum.pregnant, sum.births, sum.deaths], [8, 0, 0, 0, 0, 0]);
   assert.equal(sum.pop, 8);
   assert.equal(sum.homeless, 8);
   assert.equal(sum.housing, 0);
@@ -312,7 +314,7 @@ test('INTEGRATION: three game days of a small village', () => {
   assert.ok(Date.now() - t0 < 20000, `took ${Date.now() - t0} ms`);
 });
 
-test('INTEGRATION: ten game days with fishery, hunter, sheepfarm, herbalist, infirmary, weaver and market', () => {
+test('INTEGRATION: thirty game days (seed 5) with fishery, hunter, sheepfarm, herbalist, infirmary, weaver and market', () => {
   const t0 = Date.now();
   const s = createWorld(5);
   for (let i = 0; i < 14; i++) addVillager(s, SPAWN.x + (i % 5), SPAWN.z + 3);   // pop 22 unlocks everything used
@@ -339,9 +341,25 @@ test('INTEGRATION: ten game days with fishery, hunter, sheepfarm, herbalist, inf
   put('weaver', SPAWN.x + 20, SPAWN.z - 20);
   put('market', SPAWN.x + 5, SPAWN.z + 35);
 
-  const steps = Math.round((DAY_LENGTH * 10) / 0.1);
-  assert.doesNotThrow(() => { for (let i = 0; i < steps; i++) tick(s, 0.1); });
-  assert.equal(clock(s).day, 11);
+  const seen = new Set();   // events are capped at 20, so collect marriages and births as they happen
+  const steps = Math.round((DAY_LENGTH * 30) / 0.1);
+  assert.doesNotThrow(() => {
+    for (let i = 0; i < steps; i++) {
+      tick(s, 0.1);
+      if (i % 100 === 0) for (const e of s.events) if (/^(💍|👶)/u.test(e.text)) seen.add(`${e.t}|${e.text}`);
+    }
+  });
+  assert.equal(clock(s).day, 31);
+  const marriages = [...seen].filter((t) => t.includes('💍')).length;
+  const births = [...seen].filter((t) => t.includes('👶')).length;
+  assert.ok(marriages >= 1, `marriages: ${marriages}`);
+  assert.ok(births >= 1, `births: ${births}`);
+  assert.ok(summary(s).births >= 1);
+  for (const v of s.villagers) {
+    assert.ok(Number.isFinite(v.age) && v.age < v.deathAge);
+    if (v.spouseId != null) assert.equal(s.villagers.find((w) => w.id === v.spouseId)?.spouseId, v.id);
+    for (const p of v.parents) assert.ok(typeof p === 'number');
+  }
   for (const [type, id] of Object.entries(placed)) {
     const b = s.buildings.find((x) => x.id === id);
     assert.ok(b && b.built, `${type} built`);
@@ -351,5 +369,5 @@ test('INTEGRATION: ten game days with fishery, hunter, sheepfarm, herbalist, inf
   assert.ok(s.events.length <= 20 && s.fx.length <= 20);
   const copy = deserialize(serialize(s));
   assert.doesNotThrow(() => tick(copy, 10));
-  assert.ok(Date.now() - t0 < 30000, `took ${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < 60000, `took ${Date.now() - t0} ms`);
 });

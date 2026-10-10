@@ -5,6 +5,7 @@ import {
 import { heightAt, isWater } from './terrain.js';
 
 const DEFAULT_GEO = { heightAt, isWater };
+const WATERSIDE_SLOPE_MUL = 2.5;
 const BUILDING_GAP = 0.5;
 const NODE_PAD = 0.8;
 
@@ -35,7 +36,7 @@ export function footprintOK(state, x, z, r, opts = {}, geo = DEFAULT_GEO) {
     return { ok: false, reason: 'อยู่บนน้ำ' };
   }
   const hs = pts.map(([px, pz]) => geo.heightAt(state.terrain, px, pz));
-  if (Math.max(...hs) - Math.min(...hs) > MAX_SLOPE) {
+  if (Math.max(...hs) - Math.min(...hs) > MAX_SLOPE * (opts.slopeMul || 1)) {
     return { ok: false, reason: 'พื้นชันเกินไป' };
   }
   for (const b of state.buildings) {
@@ -64,7 +65,8 @@ function waterWithin(state, x, z, reach, geo) {
 
 export function canPlace(state, type, x, z, rot, geo = DEFAULT_GEO) {
   const cfg = BUILDINGS[type];
-  const fp = footprintOK(state, x, z, cfg.radius, {}, geo);
+  // waterside buildings stand on stilts, so river banks may be steeper than usual
+  const fp = footprintOK(state, x, z, cfg.radius, { slopeMul: cfg.nearWater ? WATERSIDE_SLOPE_MUL : 1 }, geo);
   if (!fp.ok) return fp;
   if (cfg.nearWater && !waterWithin(state, x, z, cfg.radius + NEAR_WATER_DIST, geo)) {
     return { ok: false, reason: 'ต้องวางติดแหล่งน้ำ' };

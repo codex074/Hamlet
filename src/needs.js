@@ -12,6 +12,10 @@ import { createVillager, removeVillager } from './villagers.js';
 import { pushEvent } from './events.js';
 import { startUpgrade, upgradeStatus } from './upgrades.js';
 import { processSickness } from './sickness.js';
+import {
+  processDeaths, processFamilies, spawnImmigrantGroup, homelessUnits, packUnits, attachToFamily,
+} from './families.js';
+import { stageOf } from './taskutil.js';
 
 export { pushEvent };
 const NO_ZONE_MESSAGE = 'ระบายโซนที่อยู่อาศัยเพื่อให้ชาวบ้านสร้างบ้าน';
@@ -133,7 +137,10 @@ function updateUnhappiness(state, house) {
   }
   house.unhappyDays += 1;
   if (house.unhappyDays < LEAVE_AFTER_DAYS) return;
-  removeVillager(state, house.residents[house.residents.length - 1]);
+  const byId = new Map(state.villagers.map((v) => [v.id, v]));
+  const grown = house.residents.filter((id) => byId.has(id) && stageOf(byId.get(id)) !== 'child');
+  const pool = grown.length > 0 ? grown : house.residents;
+  removeVillager(state, pool[pool.length - 1]);
   house.unhappyDays = 0;
   pushEvent(state, 'ชาวบ้านคนหนึ่งย้ายออกจากหมู่บ้านเพราะไม่พอใจ');
 }
@@ -216,18 +223,22 @@ function immigrate(state, hs, rand) {
     return;
   }
   const count = 2 + Math.floor(avg * 4);
-  for (let i = 0; i < count; i++) {
-    const p = edgeSpawn(state, rand);
-    state.villagers.push(createVillager(state, p.x, p.z));
+  const p = edgeSpawn(state, rand);
+  let arrived = 0;
+  while (arrived < count) {
+    arrived += spawnImmigrantGroup(state, rand, () => p, count - arrived).length;
   }
   pushEvent(state, `ชาวบ้าน ${count} คนย้ายเข้ามาในหมู่บ้าน`);
 }
 
 export function processMidnight(state, rand) {
+  processDeaths(state);
   const hs = houses(state);
   for (const h of hs) evaluateHouse(state, h);
   // own generator so sickness never disturbs the other random draws
   processSickness(state, mulberry32(((state.seed * 2654435761) ^ Math.floor(state.time)) >>> 0));
+  // families draw from their own generator too
+  processFamilies(state, mulberry32(((state.seed * 40503) ^ Math.floor(state.time)) >>> 0));
   consumeCloth(state, hs);
   equipTools(state);
   let income = 0;
@@ -242,40 +253,42 @@ function townhallOf(state) {
   return state.buildings.find((b) => b.type === 'townhall') ?? { x: SPAWN.x, z: SPAWN.z };
 }
 
+function houseSlots(state, hs) {
+  const hall = townhallOf(state);
+  return hs
+    .map((h) => ({
+      id: h.id, house: h, cap: HOUSE_LEVELS[h.level - 1].capacity, count: h.residents.length,
+      free: HOUSE_LEVELS[h.level - 1].capacity - h.residents.length, d: distance(h.x, h.z, hall.x, hall.z),
+    }))
+    .sort((a, b) => a.d - b.d || a.id - b.id);
+}
+
+// Houses households as units: couples and their minor children move in together; singles fill the rest.
 export function assignHomes(state) {
   const alive = new Map(state.villagers.map((v) => [v.id, v]));
   const hs = houses(state);
   for (const h of hs) h.residents = h.residents.filter((id) => alive.get(id)?.homeId === h.id);
   const ids = new Set(hs.map((h) => h.id));
   for (const v of state.villagers) if (v.homeId != null && !ids.has(v.homeId)) v.homeId = null;
-  const hall = townhallOf(state);
-  for (const v of state.villagers) {
-    if (v.homeId != null) continue;
-    let best = null;
-    let bestD = Infinity;
-    for (const h of hs) {
-      if (h.residents.length >= HOUSE_LEVELS[h.level - 1].capacity) continue;
-      const d = distance(h.x, h.z, hall.x, hall.z);
-      if (d < bestD) {
-        best = h;
-        bestD = d;
-      }
+  attachToFamily(state);
+  const { placed } = packUnits(homelessUnits(state), houseSlots(state, hs));
+  for (const { unit, slot } of placed) {
+    for (const m of unit.members) {
+      slot.house.residents.push(m.id);
+      m.homeId = slot.house.id;
+      delete m.avoidHomeId;
     }
-    if (!best) return;
-    best.residents.push(v.id);
-    v.homeId = best.id;
   }
 }
 
-function freeCapacity(state) {
-  let free = 0;
+// Houses that do not exist yet count as empty slots of the base capacity.
+function plannedSlots(state) {
+  const slots = houseSlots(state, houses(state));
   for (const b of state.buildings) {
-    if (b.type !== 'house') continue;
-    free += b.built
-      ? HOUSE_LEVELS[b.level - 1].capacity - b.residents.length
-      : UNBUILT_HOUSE_CAPACITY;
+    if (b.type !== 'house' || b.built) continue;
+    slots.push({ id: b.id, cap: UNBUILT_HOUSE_CAPACITY, count: 0, free: UNBUILT_HOUSE_CAPACITY });
   }
-  return free;
+  return slots;
 }
 
 function warnNoZone(state) {
@@ -285,15 +298,16 @@ function warnNoZone(state) {
 }
 
 export function planHouses(state, rand) {
-  const homeless = state.villagers.filter((v) => v.homeId == null).length;
-  if (homeless === 0) return;
+  if (!state.villagers.some((v) => v.homeId == null)) return;
   const zones = state.zones.filter((z) => z.kind === 'residential').sort((a, b) => a.id - b.id);
   if (zones.length === 0) {
     warnNoZone(state);
     return;
   }
   const unbuilt = state.buildings.filter((b) => b.type === 'house' && !b.built).length;
-  if (homeless <= freeCapacity(state) || unbuilt >= MAX_UNBUILT_HOUSES) return;
+  // families count as units: build only when some household still has no place to go
+  const { unplaced } = packUnits(homelessUnits(state), plannedSlots(state));
+  if (unplaced.length === 0 || unbuilt >= MAX_UNBUILT_HOUSES) return;
   for (const zone of zones) {
     const site = findHouseSite(state, zone, rand);
     if (!site) continue;

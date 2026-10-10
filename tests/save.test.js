@@ -29,7 +29,7 @@ test('serialize omits terrain and writes wear as a plain array', () => {
   assert.equal(data.terrain, undefined);
   assert.ok(Array.isArray(data.wear));
   assert.equal(data.wear.length, GRID * GRID);
-  assert.equal(data.version, 2);
+  assert.equal(data.version, 3);
 });
 
 test('deserialize round-trips state and regenerates terrain', () => {
@@ -54,7 +54,7 @@ test('deserialize throws on invalid input', () => {
   const good = JSON.parse(serialize(s));
   assert.throws(() => deserialize('not json'), Error);
   assert.throws(() => deserialize('null'), Error);
-  assert.throws(() => deserialize(JSON.stringify({ ...good, version: 3 })), Error);
+  assert.throws(() => deserialize(JSON.stringify({ ...good, version: 4 })), Error);
   assert.throws(() => deserialize(JSON.stringify({ ...good, buildings: 5 })), Error);
   assert.throws(() => deserialize(JSON.stringify({ ...good, villagers: undefined })), Error);
   assert.throws(() => deserialize(JSON.stringify({ ...good, wear: [1, 2] })), Error);
@@ -101,7 +101,7 @@ test('loadGame returns null for corrupt saves and storage errors', () => {
   }
 });
 
-test('v1 saves migrate to v2: deer, fx, sickness, house and supply fields, ore veins', () => {
+test('v1 saves migrate (to v3): deer, fx, sickness, house and supply fields, ore veins', () => {
   const s = createWorld(3);
   addHouse(s, 100, 100, 2, 2);
   const maxId = Math.max(...s.nodes.filter((n) => n.kind !== 'ore').map((n) => n.id));
@@ -120,7 +120,7 @@ test('v1 saves migrate to v2: deer, fx, sickness, house and supply fields, ore v
   }
   for (const v of v1.villagers) { delete v.sick; delete v.sickDays; delete v.healer; }
   const m = deserialize(JSON.stringify(v1));
-  assert.equal(m.version, 2);
+  assert.equal(m.version, 3);
   assert.deepEqual(m.fx, []);
   assert.ok(m.animals.length > 0 && m.animals.length <= DEER_COUNT);
   const house = m.buildings.find((b) => b.type === 'house');
@@ -134,7 +134,7 @@ test('v1 saves migrate to v2: deer, fx, sickness, house and supply fields, ore v
   assert.ok(ore.length > 0);
   assert.ok(ore.every((n) => n.id > maxId));
   assert.equal(new Set(m.nodes.map((n) => n.id)).size, m.nodes.length);
-  assert.equal(JSON.parse(serialize(m)).version, 2);
+  assert.equal(JSON.parse(serialize(m)).version, 3);
   assert.doesNotThrow(() => tick(m, 20));
   assert.doesNotThrow(() => deserialize(serialize(m)));
 });

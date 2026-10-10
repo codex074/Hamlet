@@ -10,7 +10,7 @@ import {
   emptyStock, distance, nearestStorage, addStock, totalStock, isStorage,
 } from './economy.js';
 import { canPlace as placementCanPlace, canPaintZone as placementCanPaintZone } from './placement.js';
-import { stepVillager, failVillager, createVillager, getBuilding, isSite } from './villagers.js';
+import { stepVillager, failVillager, getBuilding, isSite } from './villagers.js';
 import {
   clock, serviceCovered, pushEvent, newBuilding, clearNodesUnder, processMidnight, assignHomes, planHouses,
   evaluateHouse,
@@ -18,8 +18,14 @@ import {
 import { pushFx } from './events.js';
 import { createDeer, stepAnimals } from './animals.js';
 import { upgradeStatus, requestUpgrade, setAutoUpgrade } from './upgrades.js';
+import {
+  createStartingVillagers, processDeaths, villagerAt, villagerInfo, household, populationCounts,
+} from './families.js';
+import { canBuild, canWork, canTakeJob } from './taskutil.js';
 
-export { clock, serviceCovered, upgradeStatus, requestUpgrade, setAutoUpgrade };
+export {
+  clock, serviceCovered, upgradeStatus, requestUpgrade, setAutoUpgrade, villagerAt, villagerInfo, household,
+};
 
 const MAX_STEP = 0.1;
 const INITIAL_SPREAD = 6;
@@ -30,9 +36,10 @@ const ZONE_KINDS = ['residential', 'field'];
 export function createWorld(seed) {
   const terrain = generateTerrain(seed);
   const state = {
-    version: 2, seed, tick: 0, time: (DAY_LENGTH * 6) / 24, lastDay: 1, gold: START.gold, nextId: 1,
+    version: 3, seed, tick: 0, time: (DAY_LENGTH * 6) / 24, lastDay: 1, gold: START.gold, nextId: 1,
     terrain, nodes: generateNodes(seed, terrain), buildings: [], zones: [], villagers: [],
     wear: createWear(), events: [], animals: [], fx: [], deerTimer: DEER_RESPAWN_SEC,
+    births: 0, deaths: 0, departed: {},
   };
   const hall = newBuilding(state, 'townhall', SPAWN.x, SPAWN.z, 0);
   hall.built = true;
@@ -40,11 +47,11 @@ export function createWorld(seed) {
   hall.stock = { ...emptyStock(), ...START.stock };
   state.buildings.push(hall);
   const rand = mulberry32(seed + 1);
-  for (let i = 0; i < START.villagers; i++) {
+  createStartingVillagers(state, rand, () => {
     const rad = INITIAL_SPREAD * Math.sqrt(rand());
     const ang = rand() * Math.PI * 2;
-    state.villagers.push(createVillager(state, SPAWN.x + Math.cos(ang) * rad, SPAWN.z + Math.sin(ang) * rad));
-  }
+    return { x: SPAWN.x + Math.cos(ang) * rad, z: SPAWN.z + Math.sin(ang) * rad };
+  });
   state.animals = createDeer(state);
   pushEvent(state, 'ยินดีต้อนรับสู่หมู่บ้านใหม่ของคุณ เริ่มสร้างโรงตัดไม้และโกดังได้เลย');
   return state;
@@ -105,8 +112,9 @@ export function summary(state) {
     homeless: state.villagers.filter((v) => v.homeId == null).length, housing,
     happiness: residents > 0 ? weighted / residents : 1,
     day: c.day, hour: c.hour, isNight: c.isNight,
-    unemployed: state.villagers.filter((v) => v.jobId == null).length,
+    unemployed: state.villagers.filter((v) => v.jobId == null && canBuild(v)).length,
     sick: state.villagers.filter((v) => v.sick).length,
+    ...populationCounts(state), births: state.births ?? 0, deaths: state.deaths ?? 0,
   };
 }
 
@@ -274,28 +282,40 @@ function regrowBerries(state, dt) {
 
 function assignJobs(state) {
   const jobs = state.buildings.filter((b) => b.built && BUILDINGS[b.type].job);
-  const jobIds = new Set(jobs.map((b) => b.id));
-  for (const v of state.villagers) if (v.jobId != null && !jobIds.has(v.jobId)) v.jobId = null;
+  const jobById = new Map(jobs.map((b) => [b.id, b]));
+  // Children, pregnant, sick villagers and elders in heavy jobs lose their post.
+  for (const v of state.villagers) {
+    if (v.jobId == null) continue;
+    const b = jobById.get(v.jobId);
+    if (!b || !canTakeJob(v, b)) v.jobId = null;
+  }
   for (const b of jobs) {
     const mine = state.villagers.filter((v) => v.jobId === b.id);
     while (mine.length > b.desiredWorkers) mine.pop().jobId = null;
     b.workers = mine.map((v) => v.id);
   }
-  // Keep a few villagers free as builders/haulers while there is construction work.
+  // Keep a few able adults free as builders/haulers while there is construction work.
   const openSites = state.buildings.filter((b) => !b.built || b.upgrading).length;
   const reserve = Math.min(BUILDER_RESERVE, openSites);
-  const free = state.villagers.filter((v) => v.jobId == null);
+  const free = state.villagers.filter((v) => v.jobId == null && canBuild(v));
   for (let i = jobs.length - 1; i >= 0 && free.length < reserve; i--) {
     const b = jobs[i];
-    while (b.workers.length > 0 && free.length < reserve) {
-      const id = b.workers.pop();
-      const v = state.villagers.find((w) => w.id === id);
-      if (v) { v.jobId = null; free.push(v); }
+    for (let j = b.workers.length - 1; j >= 0 && free.length < reserve; j--) {
+      const v = state.villagers.find((w) => w.id === b.workers[j]);
+      if (!v || !canBuild(v)) continue;   // elders cannot act as builders anyway
+      v.jobId = null;
+      b.workers.splice(j, 1);
+      free.push(v);
     }
   }
+  // Elders are never builders, so they fill light jobs first.
+  const elders = state.villagers.filter((v) => v.jobId == null && canWork(v) && !canBuild(v));
   for (const b of jobs) {
-    while (b.workers.length < b.desiredWorkers && free.length > reserve) {
-      const v = free.shift();
+    while (b.workers.length < b.desiredWorkers) {
+      let v = null;
+      if (BUILDINGS[b.type].light && elders.length > 0) v = elders.shift();
+      else if (free.length > reserve) v = free.shift();
+      if (!v) break;
       v.jobId = b.id;
       b.workers.push(v.id);
     }
@@ -312,6 +332,7 @@ function stepWorld(state, dt) {
   regrowBerries(state, dt);
   updateConstruction(state);
   if (Math.floor(state.time) !== before) {
+    processDeaths(state);
     assignJobs(state);
     for (const b of state.buildings) if (b.type === 'house' && b.built) evaluateHouse(state, b);
     assignHomes(state);

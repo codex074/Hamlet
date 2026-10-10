@@ -64,7 +64,7 @@ export const BUILDINGS = {
   woodcutter: { name: 'คนตัดไม้', category: 'resource', radius: 3.5, cost: { wood: 8 }, buildTime: 15,
                 workers: 2, job: 'gather', node: 'tree', output: { wood: 2 }, time: 6, unlockPop: 0 },
   forager:    { name: 'คนเก็บของป่า', category: 'resource', radius: 3.5, cost: { wood: 8 }, buildTime: 15,
-                workers: 2, job: 'gather', node: 'berry', output: { berries: 2 }, time: 5, unlockPop: 0 },
+                workers: 2, job: 'gather', node: 'berry', output: { berries: 2 }, time: 5, unlockPop: 0, light: true },
   quarry:     { name: 'เหมืองหิน', category: 'resource', radius: 4, cost: { wood: 12 }, buildTime: 20,
                 workers: 2, job: 'gather', node: 'rock', output: { stone: 2 }, time: 8, unlockPop: 0 },
   sawmill:    { name: 'โรงเลื่อย', category: 'production', radius: 4.5, cost: { wood: 15, stone: 6 }, buildTime: 30,
@@ -74,29 +74,29 @@ export const BUILDINGS = {
   mill:       { name: 'โรงสี', category: 'production', radius: 4, cost: { wood: 12, stone: 10 }, buildTime: 35,
                 workers: 1, job: 'process', input: { wheat: 2 }, output: { flour: 2 }, time: 6, unlockPop: 12 },
   bakery:     { name: 'ร้านขนมปัง', category: 'production', radius: 4, cost: { planks: 10, stone: 6 }, buildTime: 30,
-                workers: 1, job: 'process', input: { flour: 1 }, output: { bread: 3 }, time: 6, unlockPop: 12 },
+                workers: 1, job: 'process', input: { flour: 1 }, output: { bread: 3 }, time: 6, unlockPop: 12, light: true },
   chapel:     { name: 'โบสถ์', category: 'service', radius: 5, cost: { wood: 15, stone: 12 }, buildTime: 40,
-                workers: 1, job: 'service', service: 'religion', serviceRadius: 45, unlockPop: 6 },
+                workers: 1, job: 'service', service: 'religion', serviceRadius: 45, unlockPop: 6, light: true },
   tavern:     { name: 'โรงเตี๊ยม', category: 'service', radius: 5, cost: { planks: 15, stone: 8 }, buildTime: 40,
-                workers: 1, job: 'service', service: 'entertainment', serviceRadius: 45, unlockPop: 20 },
+                workers: 1, job: 'service', service: 'entertainment', serviceRadius: 45, unlockPop: 20, light: true },
   fishery:    { name: 'ท่าประมง', category: 'resource', radius: 4, cost: { wood: 10 }, buildTime: 20,
                 workers: 2, job: 'fish', output: { fish: 2 }, time: 10, unlockPop: 10, nearWater: true },
   hunter:     { name: 'กระท่อมนักล่า', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
                 workers: 1, job: 'hunt', output: { meat: 3 }, time: 4, unlockPop: 8 },
   herbalist:  { name: 'คนเก็บสมุนไพร', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
-                workers: 1, job: 'gather', node: 'tree', keepNode: true, output: { herbs: 1 }, time: 7, unlockPop: 10 },
+                workers: 1, job: 'gather', node: 'tree', keepNode: true, output: { herbs: 1 }, time: 7, unlockPop: 10, light: true },
   sheepfarm:  { name: 'คอกแกะ', category: 'resource', radius: 7, cost: { wood: 15, planks: 6 }, buildTime: 35,
                 workers: 2, job: 'ranch', outputs: [{ meat: 2 }, { wool: 2 }], time: 9, unlockPop: 15 },
   ironmine:   { name: 'เหมืองแร่เหล็ก', category: 'resource', radius: 4.5, cost: { wood: 15, planks: 8 }, buildTime: 35,
                 workers: 2, job: 'gather', node: 'ore', output: { ore: 2 }, time: 10, unlockPop: 25 },
   weaver:     { name: 'ช่างทอผ้า', category: 'production', radius: 4, cost: { planks: 12, stone: 4 }, buildTime: 30,
-                workers: 1, job: 'process', input: { wool: 2 }, output: { cloth: 1 }, time: 8, unlockPop: 20 },
+                workers: 1, job: 'process', input: { wool: 2 }, output: { cloth: 1 }, time: 8, unlockPop: 20, light: true },
   blacksmith: { name: 'โรงตีเหล็ก', category: 'production', radius: 4.5, cost: { planks: 10, stone: 12 }, buildTime: 40,
                 workers: 1, job: 'process', input: { ore: 2 }, output: { tools: 1 }, time: 10, unlockPop: 25 },
   infirmary:  { name: 'สถานพยาบาล', category: 'service', radius: 5, cost: { planks: 12, stone: 10 }, buildTime: 40,
-                workers: 2, job: 'doctor', service: 'health', serviceRadius: 50, supply: 'herbs', unlockPop: 15 },
+                workers: 2, job: 'doctor', service: 'health', serviceRadius: 50, supply: 'herbs', unlockPop: 15, light: true },
   market:     { name: 'ตลาด', category: 'service', radius: 6, cost: { planks: 15, stone: 6 }, buildTime: 40,
-                workers: 2, job: 'market', service: 'clothing', serviceRadius: 50, supply: 'cloth', unlockPop: 20 },
+                workers: 2, job: 'market', service: 'clothing', serviceRadius: 50, supply: 'cloth', unlockPop: 20, light: true },
   cathedral:  { name: 'มหาวิหาร', category: 'monument', radius: 11, cost: {}, buildTime: 0,
                 workers: 0, job: null, unlockPop: 25, monument: true },
   house:      { name: 'บ้าน', category: null, radius: 3, cost: { wood: 6 }, buildTime: 12,
@@ -142,7 +142,9 @@ export const REFUND_RATIO = 0.5;
 export const BUILDER_RESERVE = 3;      // villagers kept job-free while construction sites exist
 
 export const START = {
-  villagers: 8,
+  villagers: 8,           // = couples * 2 + singles
+  couples: 3,
+  singles: 2,
   stock: { wood: 60, stone: 10, berries: 40 },
   gold: 0,
 };
@@ -163,13 +165,32 @@ export const TOOL_SPEED_BONUS = 0.3;        // work-time reduction share for 'to
 export const TOOLS_PER_BUILDING_PER_DAY = 1;
 // Fishing / hunting / ranching
 export const FISH_RADIUS = 25;              // fishers look for shore spots this close to the fishery
-export const NEAR_WATER_DIST = 8;           // fishery must have water within radius + this
+export const NEAR_WATER_DIST = 12;           // fishery must have water within radius + this
 export const HUNT_RADIUS = 60;
 export const HUNT_SHOT_DIST = 6;
 export const DEER_COUNT = 24;
 export const DEER_RESPAWN_SEC = 90;
 export const DEER_SPEED = 1.4;
 export const UPGRADE_BUILD_TIME = 8;
+
+// Families, ageing & births (1 game day = 1 year of age)
+export const CHILD_AGE = 14;                // younger than this: child (no work, no building)
+export const ELDER_AGE = 55;                // from this age: elder (light jobs only)
+export const DEATH_AGE_MIN = 70, DEATH_AGE_MAX = 85;
+export const ELDER_SPEED_MUL = 0.75, CHILD_SPEED_MUL = 0.9, PREGNANT_SPEED_MUL = 0.8;
+export const CHILD_PLAY_RADIUS = 12;        // children stay this close to home
+export const MARRY_MIN = 18, MARRY_MAX = 45;
+export const MARRY_CHANCE = 0.35;           // per eligible woman per night
+export const FERTILE_MIN = 18, FERTILE_MAX = 42;
+export const PREGNANCY_CHANCE = 0.3;        // per eligible wife per night
+export const PREGNANCY_DAYS = 2;            // midnights until birth
+export const PREGNANCY_MIN_HAPPINESS = 0.5; // house happiness needed to conceive
+export const LEAVE_HOME_AGE = 18;           // unmarried adults leave a full parental home
+export const START_AGE = { couple: [20, 35], single: [18, 30] };
+export const FAMILY_IMMIGRANT_CHANCE = 0.5; // share of immigrant groups that arrive as a family
+export const IMMIGRANT_ADULT_AGE = [18, 40], IMMIGRANT_COUPLE_AGE = [20, 40], IMMIGRANT_CHILD_AGE = [1, 12];
+export const IMMIGRANT_MAX_CHILDREN = 2;
+export const PARENT_MIN_GAP = 16;           // save migration: parent must be this much older than a child
 
 export const ZONE_BRUSH = { min: 6, max: 14, default: 9 };
 export const HOUSE_SITE_TRIES = 30;
