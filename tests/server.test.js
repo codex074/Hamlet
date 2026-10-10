@@ -5,7 +5,7 @@ import { generateKeyPairSync, createSign } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { openDb } from '../server/db.js';
-import { createApp } from '../server/app.js';
+import { createApp, ipKey } from '../server/app.js';
 import { createGoogleVerifier, cleanUsername, hashPassword, verifyPassword } from '../server/auth.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -207,19 +207,31 @@ test('rate limiting kicks in on repeated logins', async () => {
   assert.deepEqual(statuses, [401, 401, 401, 429, 429]);
 });
 
-test('per-account limit applies even when the address changes', async () => {
+test('failed-password limit per account applies across addresses but only counts failures', async () => {
   const limited = createServer(createApp({ db, rootDir: ROOT, trustProxy: true, authLimit: { max: 3, windowMs: 60_000 } }));
   await new Promise((r) => limited.listen(0, '127.0.0.1', r));
-  const url = `http://127.0.0.1:${limited.address().port}/api/login`;
+  const port = limited.address().port;
+  const post = (path, body, ip) => fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Real-IP': ip }, body: JSON.stringify(body),
+  }).then((r) => r.status);
+  assert.equal(await post('/api/register', { email: 'target@example.com', password: 'right-password' }, '10.1.0.1'), 200);
+  // unknown emails never create per-account counters
+  for (let i = 0; i < 10; i++) assert.equal(await post('/api/login', { email: `nobody${i}@example.com`, password: 'x'.repeat(8) }, `10.2.0.${i}`), 401);
+  // a correct login does not count toward the limit
+  assert.equal(await post('/api/login', { email: 'target@example.com', password: 'right-password' }, '10.3.0.1'), 200);
   const statuses = [];
-  for (let i = 0; i < 5; i++) {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Real-IP': `10.0.0.${i + 1}` },
-      body: JSON.stringify({ email: 'target@example.com', password: 'guess' + i }),
-    });
-    statuses.push(res.status);
-  }
+  for (let i = 0; i < 8; i++) statuses.push(await post('/api/login', { email: 'target@example.com', password: 'wrong' + i }, `10.4.0.${i}`));
   limited.close();
-  assert.deepEqual(statuses, [401, 401, 401, 429, 429]);
+  assert.deepEqual(statuses, [401, 401, 401, 401, 401, 401, 429, 429]);   // failure ceiling = 2 × max
+});
+
+test('ipKey groups IPv6 /64s regardless of notation', () => {
+  assert.equal(ipKey('203.0.113.7'), 'ip:203.0.113.7');
+  assert.equal(ipKey('::ffff:203.0.113.7'), 'ip:203.0.113.7');
+  const a = ipKey('2001:db8:1:2:aaaa::1');
+  assert.equal(a, 'ip6:2001:db8:1:2');
+  assert.equal(ipKey('2001:0db8:0001:0002:ffff:0:0:9'), a);
+  assert.equal(ipKey('2001:db8:0:0::5'), 'ip6:2001:db8:0:0');
+  assert.equal(ipKey('2001:db8::5'), 'ip6:2001:db8:0:0');
+  assert.notEqual(ipKey('2001:db8:1:3::1'), a);
 });

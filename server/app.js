@@ -2,6 +2,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { join, normalize, extname, sep } from 'node:path';
 import { randomInt } from 'node:crypto';
+import { isIPv6 } from 'node:net';
 import {
   hashPassword, verifyPassword, burnPasswordCheck, newToken, hashToken,
   normalizeEmail, passwordProblem, cleanUsername, cleanVillageName,
@@ -28,37 +29,13 @@ class HttpError extends Error {
 }
 
 export function createApp({ db, rootDir, googleClientId = null, googleVerify = null, trustProxy = false, authLimit = AUTH_LIMIT }) {
-  const hits = new Map(); // limiter key -> [timestamps]
-  const MAX_KEYS = 20000;
+  const ipLimiter = createLimiter(authLimit);
+  // Failed passwords per existing account: higher ceiling, failures only, so an attacker cannot cheaply lock
+  // someone out — and Google sign-in is never affected by it.
+  const failLimiter = createLimiter({ max: authLimit.max * 2, windowMs: authLimit.windowMs });
+  const tooMany = () => new HttpError(429, 'ลองหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่');
 
-  // Sliding-window limiter. Old entries are pruned instead of wiping the table, so flooding it with
-  // fresh keys cannot reset anyone else's counter.
-  function limit(key) {
-    const now = Date.now();
-    const list = (hits.get(key) || []).filter((t) => now - t < authLimit.windowMs);
-    list.push(now);
-    hits.delete(key);          // re-insert so Map order stays "least recently used first"
-    hits.set(key, list);
-    if (hits.size > MAX_KEYS) {
-      for (const [k, ts] of hits) {
-        if (hits.size <= MAX_KEYS * 0.9) break;
-        if (now - ts[ts.length - 1] >= authLimit.windowMs) hits.delete(k);
-      }
-      // still full of live keys: drop the least recently used ones
-      for (const k of hits.keys()) { if (hits.size <= MAX_KEYS) break; hits.delete(k); }
-    }
-    if (list.length > authLimit.max) throw new HttpError(429, 'ลองหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่');
-  }
-
-  // IPv6 clients usually control a whole /64, so count them per /64.
-  function ipKey(ip) {
-    const v = String(ip).replace(/^::ffff:/, '');
-    if (!v.includes(':')) return `ip:${v}`;
-    return `ip6:${v.split(':').slice(0, 4).join(':')}`;
-  }
-  const rateLimit = (ip) => limit(ipKey(ip));
-  // Per-account limit stops slow brute force spread over many addresses.
-  const accountLimit = (email) => { if (email) limit(`email:${email}`); };
+  function rateLimit(ip) { if (!ipLimiter.hit(ipKey(ip))) throw tooMany(); }
 
   const clientIp = (req) => (trustProxy && req.headers['x-real-ip']) || req.socket.remoteAddress || '?';
   const isSecure = (req) => (trustProxy ? req.headers['x-forwarded-proto'] === 'https' : !!req.socket.encrypted);
@@ -163,14 +140,18 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
       rateLimit(clientIp(req));
       const body = await readJson(req, MAX_SMALL_BODY);
       const email = normalizeEmail(body.email);
-      accountLimit(email);
       const password = typeof body.password === 'string' ? body.password.slice(0, 256) : '';
       const user = email ? db.userByEmail(email) : null;
       if (!user || !user.password_hash) {
         await burnPasswordCheck(password);
         throw new HttpError(401, user ? 'บัญชีนี้ใช้การเข้าสู่ระบบด้วย Google' : 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
       }
-      if (!(await verifyPassword(password, user.password_hash))) throw new HttpError(401, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      const failKey = `user:${user.id}`;
+      if (failLimiter.count(failKey) >= failLimiter.max) throw tooMany();
+      if (!(await verifyPassword(password, user.password_hash))) {
+        failLimiter.hit(failKey);
+        throw new HttpError(401, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      }
       startSession(req, res, user);
       return { user: publicUser(user) };
     }
@@ -301,6 +282,51 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
       return sendJson(res, 500, { error: 'เซิร์ฟเวอร์ขัดข้อง กรุณาลองใหม่' });
     }
   };
+}
+
+// Sliding-window limiter with a bounded table. Expired keys are pruned; when the table is still full of live
+// keys, NEW keys are refused (fail closed) rather than evicting live counters, so flooding cannot reset anyone.
+function createLimiter({ max, windowMs, maxKeys = 20000 }) {
+  const hits = new Map();
+  const live = (key, now) => (hits.get(key) || []).filter((t) => now - t < windowMs);
+  function prune(now) {
+    for (const [k, ts] of hits) if (now - ts[ts.length - 1] >= windowMs) hits.delete(k);
+  }
+  return {
+    max,
+    count(key) { return live(key, Date.now()).length; },
+    // Records a hit; returns false when the key is over its limit (or cannot be tracked).
+    hit(key) {
+      const now = Date.now();
+      if (!hits.has(key) && hits.size >= maxKeys) {
+        prune(now);
+        if (hits.size >= maxKeys) return false;
+      }
+      const list = live(key, now);
+      list.push(now);
+      hits.set(key, list);
+      return list.length <= max;
+    },
+  };
+}
+
+// Limiter key for a client address. IPv6 clients usually control a whole /64, so they are grouped by
+// the first four hextets of the fully expanded address (handles '::' compression and embedded IPv4).
+export function ipKey(ip) {
+  let v = String(ip || '?').trim().toLowerCase();
+  if (v.startsWith('::ffff:') && v.includes('.')) v = v.slice(7);   // IPv4-mapped
+  if (!isIPv6(v)) return `ip:${v}`;
+  v = v.split('%')[0];
+  if (v.includes('.')) {                                           // trailing dotted IPv4 → two hextets
+    const i = v.lastIndexOf(':');
+    const [a, b, c, d] = v.slice(i + 1).split('.').map(Number);
+    v = `${v.slice(0, i + 1)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head, tail = ''] = v.split('::');
+  const h = head ? head.split(':') : [];
+  const t = v.includes('::') && tail ? tail.split(':') : [];
+  const groups = v.includes('::') ? [...h, ...Array(8 - h.length - t.length).fill('0'), ...t] : h;
+  return `ip6:${groups.slice(0, 4).map((g) => parseInt(g || '0', 16).toString(16)).join(':')}`;
 }
 
 function clampInt(v, lo, hi, fallback) {
