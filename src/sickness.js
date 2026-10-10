@@ -2,6 +2,7 @@
 import {
   SICK_CHANCE_PER_DAY, SICK_HUNGRY_MUL, SICK_COVERED_MUL, SICK_LEAVE_DAYS,
 } from './config.js';
+import { difficultyOf } from './settings.js';
 import { pushEvent } from './events.js';
 import { failVillager, removeVillager } from './villagers.js';
 
@@ -20,7 +21,7 @@ export function ageSickness(state) {
 
 function sickChance(state, v) {
   const home = state.buildings.find((b) => b.id === v.homeId);
-  let p = SICK_CHANCE_PER_DAY;
+  let p = SICK_CHANCE_PER_DAY * difficultyOf(state).sickness;
   if (home?.starvedToday) p *= SICK_HUNGRY_MUL;
   if (home?.needsMet?.health) p *= SICK_COVERED_MUL;
   return p;

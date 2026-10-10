@@ -1,18 +1,32 @@
 // Save / load. Pure except for optional globalThis.localStorage access (always inside try/catch).
-import { GRID, BUILDINGS, DEER_RESPAWN_SEC } from './config.js';
+import { GRID, BUILDINGS, DEER_RESPAWN_SEC, MAP_SIZES, PLOT_SIZE, DIFFICULTY } from './config.js';
 import { generateTerrain, generateNodes } from './terrain.js';
 import { createDeer } from './animals.js';
 import { emptyNeeds } from './needs.js';
 import { migrateVillagersToV3 } from './families.js';
+import { normalizeSettings, worldDims, LEGACY_SETTINGS } from './settings.js';
+import { allOwnedTerritory } from './territory.js';
+import { countNodes } from './regrowth.js';
 
 const SAVE_KEY = 'hamlet-save-v1';
-const SAVE_VERSION = 3;
-const SAVE_VERSIONS = [1, 2, 3];
+const SAVE_VERSION = 4;
+const SAVE_VERSIONS = [1, 2, 3, 4];
 const ARRAY_FIELDS = ['nodes', 'buildings', 'zones', 'villagers', 'events'];
 
 export function serialize(state) {
   const { terrain, wear, ...rest } = state;
   return JSON.stringify({ ...rest, wear: Array.from(wear) });
+}
+
+// Cells in the wear grid: the small map before v4, otherwise from the saved settings.
+function expectedWearLength(data) {
+  if (data.version < 4) return GRID * GRID;
+  const settings = data.settings;
+  if (!settings || typeof settings !== 'object' || !(settings.mapSize in MAP_SIZES)) return -1;
+  const territory = data.territory;
+  const plots = MAP_SIZES[settings.mapSize] / PLOT_SIZE;
+  if (!territory || !Array.isArray(territory.owned) || territory.owned.length !== plots * plots) return -1;
+  return (MAP_SIZES[settings.mapSize] / 2) ** 2;
 }
 
 function parseSave(str) {
@@ -26,7 +40,7 @@ function parseSave(str) {
   const valid = data && typeof data === 'object' && SAVE_VERSIONS.includes(data.version)
     && Number.isFinite(data.seed)
     && fields.every((k) => Array.isArray(data[k]))
-    && Array.isArray(data.wear) && data.wear.length === GRID * GRID;
+    && Array.isArray(data.wear) && data.wear.length === expectedWearLength(data);
   if (!valid) throw new Error('ไฟล์บันทึกไม่ถูกต้อง');
   return data;
 }
@@ -58,22 +72,49 @@ function migrateV1(state) {
 function addOreNodes(state) {
   let id = state.nodes.reduce((m, n) => Math.max(m, n.id), 0);
   const free = (n) => !state.buildings.some((b) => Math.hypot(b.x - n.x, b.z - n.z) < BUILDINGS[b.type].radius + 1);
-  for (const n of generateNodes(state.seed, state.terrain)) {
+  for (const n of generateNodes(state.seed, state.terrain, state.settings)) {
     if (n.kind === 'ore' && free(n)) state.nodes.push({ ...n, id: ++id });
   }
 }
 
 // v2 -> v3: genders, ages, names, couples and parent/child links.
 function migrateV2(state) {
-  state.version = SAVE_VERSION;
+  state.version = 3;
   migrateVillagersToV3(state);
+}
+
+// v3 -> v4: world settings, per-world dims, territory (all owned), difficulty, initial node counts.
+// The terrain keeps its original single river (legacyRiver) so the village stays on the same map.
+function migrateV3(state) {
+  state.version = SAVE_VERSION;
+  state.settings = { ...LEGACY_SETTINGS };
+  state.world = worldDims(state.settings);
+  state.territory = allOwnedTerritory(state.world.plots);
+  state.difficulty = 'normal';
+  state.legacyRiver = true;
+  state.initialNodes = countNodes(state.nodes);
+}
+
+// Defaults for fields a hand-edited or partial v4 save may lack.
+function repairV4(state) {
+  state.settings = normalizeSettings(state.settings);
+  state.world = worldDims(state.settings);
+  state.difficulty = Object.hasOwn(DIFFICULTY, state.difficulty) ? state.difficulty : 'normal';
+  state.initialNodes ??= countNodes(state.nodes);
+  if (!Array.isArray(state.territory.owned)) state.territory = allOwnedTerritory(state.world.plots);
+  state.territory.bought = Number.isFinite(state.territory.bought) ? state.territory.bought : 0;
 }
 
 export function deserialize(str) {
   const data = parseSave(str);
-  const state = { ...data, terrain: generateTerrain(data.seed), wear: Float32Array.from(data.wear) };
+  const settings = data.version >= 4 ? normalizeSettings(data.settings) : LEGACY_SETTINGS;
+  const terrain = generateTerrain(data.seed, settings, { legacy: data.version < 4 || data.legacyRiver === true });
+  const state = { ...data, terrain, wear: Float32Array.from(data.wear) };
+  if (data.version < 4) state.settings = { ...LEGACY_SETTINGS };
   if (data.version === 1) migrateV1(state);
   if (data.version <= 2) migrateV2(state);
+  if (data.version <= 3) migrateV3(state);
+  else repairV4(state);
   return state;
 }
 

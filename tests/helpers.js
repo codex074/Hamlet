@@ -5,8 +5,11 @@ import { createVillager } from '../src/villagers.js';
 import { newBuilding } from '../src/needs.js';
 import { createWorld, canPlace, canPaintZone } from '../src/sim.js';
 
-export function world(seed = 1) {
-  return createWorld(seed);
+// The classic 240 m map (centre = SPAWN) keeps fixed-coordinate tests simple.
+export const SMALL = { mapSize: 'small' };
+
+export function world(seed = 1, settings = SMALL) {
+  return createWorld(seed, settings);
 }
 
 export function townhall(state) {

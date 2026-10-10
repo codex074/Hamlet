@@ -1,8 +1,8 @@
 // Needs, happiness, taxes, house upgrades, immigration and housing. Pure: no DOM, no globals.
 import {
-  DAY_LENGTH, NIGHT_START, NIGHT_END, BUILDINGS, HOUSE_LEVELS, SERVICE_STAFFED_DIST, SPAWN,
+  DAY_LENGTH, NIGHT_START, NIGHT_END, BUILDINGS, HOUSE_LEVELS, SERVICE_STAFFED_DIST,
   IMMIGRATION_MIN_HAPPINESS, IMMIGRATION_MAX_HOMELESS, LEAVE_HAPPINESS, LEAVE_AFTER_DAYS,
-  WORLD_SIZE, EDGE_MARGIN, FOODS, CLOTH_PER_HOUSE_PER_DAY, TOOLS_PER_BUILDING_PER_DAY,
+  EDGE_MARGIN, FOODS, CLOTH_PER_HOUSE_PER_DAY, TOOLS_PER_BUILDING_PER_DAY,
 } from './config.js';
 import { mulberry32 } from './rng.js';
 import { distance, nearestStorage, addStock, takeStock, totalStock } from './economy.js';
@@ -16,6 +16,9 @@ import {
   processDeaths, processFamilies, spawnImmigrantGroup, homelessUnits, packUnits, attachToFamily,
 } from './families.js';
 import { stageOf } from './taskutil.js';
+import { sizeOf, spawnOf } from './world.js';
+import { removeNode, getNode } from './nodeindex.js';
+import { difficultyOf } from './settings.js';
 
 export { pushEvent };
 const NO_ZONE_MESSAGE = 'ระบายโซนที่อยู่อาศัยเพื่อให้ชาวบ้านสร้างบ้าน';
@@ -90,11 +93,21 @@ export function emptyNeeds() {
   };
 }
 
+// Construction cost of a NEW placement under the world's difficulty (rounded up, at least 1 per resource).
+export function scaledCost(state, cost) {
+  const mul = difficultyOf(state).cost;
+  if (mul === 1) return { ...cost };
+  const out = {};
+  for (const [res, n] of Object.entries(cost)) out[res] = Math.max(1, Math.ceil(n * mul - 1e-9));
+  return out;
+}
+
 export function newBuilding(state, type, x, z, rot) {
   const cfg = BUILDINGS[type];
+  const cost = type === 'cathedral' ? { ...cfg.cost } : scaledCost(state, cfg.cost);
   const b = {
-    id: state.nextId++, type, x, z, rot,
-    built: false, progress: 0, needed: { ...cfg.cost }, incoming: {},
+    id: state.nextId++, type, x, z, rot, cost,
+    built: false, progress: 0, needed: { ...cost }, incoming: {},
     desiredWorkers: cfg.workers ?? 0, workers: [],
   };
   if (type === 'house') {
@@ -114,11 +127,11 @@ export function clearNodesUnder(state, x, z, r) {
   const ids = new Set(nodesUnder(state, x, z, r));
   if (ids.size === 0) return;
   let wood = 0;
-  for (let i = state.nodes.length - 1; i >= 0; i--) {
-    const n = state.nodes[i];
-    if (!ids.has(n.id)) continue;
+  for (const id of ids) {
+    const n = getNode(state, id);
+    if (!n) continue;
     if (n.kind === 'tree') wood += n.amount;
-    state.nodes.splice(i, 1);
+    removeNode(state, n);
   }
   const store = nearestStorage(state, x, z);
   if (wood > 0 && store) addStock(store, 'wood', wood);
@@ -175,7 +188,7 @@ function equipTools(state) {
 
 function processHouse(state, house) {
   const tax = HOUSE_LEVELS[house.level - 1].tax;
-  const income = house.residents.length * tax * house.happiness;
+  const income = house.residents.length * tax * house.happiness * difficultyOf(state).tax;
   if (house.autoUpgrade && upgradeStatus(state, house).canUpgrade) startUpgrade(state, house);
   updateUnhappiness(state, house);
   house.starvedToday = false;
@@ -201,9 +214,9 @@ function averageHappiness(state, hs) {
 
 function edgeSpawn(state, rand) {
   const lo = EDGE_MARGIN;
-  const hi = WORLD_SIZE - EDGE_MARGIN;
-  let x = SPAWN.x;
-  let z = SPAWN.z;
+  const hi = sizeOf(state) - EDGE_MARGIN;
+  let x = spawnOf(state).x;
+  let z = spawnOf(state).z;
   for (let i = 0; i < SPAWN_TRIES; i++) {
     const t = lo + rand() * (hi - lo);
     const edge = Math.floor(rand() * 4);
@@ -222,7 +235,7 @@ function immigrate(state, hs, rand) {
     pushEvent(state, 'ไม่มีใครอยากย้ายเข้ามา เพราะหมู่บ้านไม่มีอาหาร');
     return;
   }
-  const count = 2 + Math.floor(avg * 4);
+  const count = Math.max(1, Math.round((2 + Math.floor(avg * 4)) * difficultyOf(state).immigration));
   const p = edgeSpawn(state, rand);
   let arrived = 0;
   while (arrived < count) {
@@ -250,7 +263,7 @@ export function processMidnight(state, rand) {
 // ---------- housing ----------
 
 function townhallOf(state) {
-  return state.buildings.find((b) => b.type === 'townhall') ?? { x: SPAWN.x, z: SPAWN.z };
+  return state.buildings.find((b) => b.type === 'townhall') ?? spawnOf(state);
 }
 
 function houseSlots(state, hs) {

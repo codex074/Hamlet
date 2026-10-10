@@ -1,11 +1,18 @@
 // World state, the fixed-step tick and player commands. Pure: no DOM, no globals.
 import {
-  DAY_LENGTH, SPAWN, START, BUILDINGS, CATHEDRAL_STAGES, HOUSE_LEVELS, NODE_AMOUNT,
-  BERRY_REGROW_PER_SEC, REFUND_RATIO, ZONE_BRUSH, RESOURCES, BUILDER_RESERVE, DEER_RESPAWN_SEC,
+  DAY_LENGTH, START, BUILDINGS, CATHEDRAL_STAGES, HOUSE_LEVELS, DIFFICULTY, START_LAYOUT,
+  START_STOCK_MUL, START_GOLD_BONUS, BERRY_REGROW_PER_SEC, REFUND_RATIO, ZONE_BRUSH, RESOURCES,
+  BUILDER_RESERVE, DEER_RESPAWN_SEC,
 } from './config.js';
 import { mulberry32 } from './rng.js';
 import { generateTerrain, generateNodes } from './terrain.js';
 import { createWear, decayWear } from './wear.js';
+import { normalizeSettings, worldDims, nodeAmountFor, DEFAULT_SETTINGS, SETTINGS_OPTIONS } from './settings.js';
+import { spawnOf } from './world.js';
+import {
+  createTerritory, isOwned, plotInfo, plotPrice, buyPlot, ownedPlotCount,
+} from './territory.js';
+import { processRegrowth, growSaplings, countNodes } from './regrowth.js';
 import {
   emptyStock, distance, nearestStorage, addStock, totalStock, isStorage,
 } from './economy.js';
@@ -25,36 +32,62 @@ import { canBuild, canWork, canTakeJob } from './taskutil.js';
 
 export {
   clock, serviceCovered, upgradeStatus, requestUpgrade, setAutoUpgrade, villagerAt, villagerInfo, household,
+  normalizeSettings, DEFAULT_SETTINGS, SETTINGS_OPTIONS, spawnOf, plotInfo, plotPrice, buyPlot, isOwned,
 };
 
 const MAX_STEP = 0.1;
+const SLOW_TICK = 1;   // game seconds between berry regrowth / sapling growth / wear decay
 const INITIAL_SPREAD = 6;
 const ZONE_KINDS = ['residential', 'field'];
 
 // ---------- world creation ----------
 
-export function createWorld(seed) {
-  const terrain = generateTerrain(seed);
+export const SAVE_VERSION = 4;
+
+function scaledStock(base, mul) {
+  const out = {};
+  for (const [res, n] of Object.entries(base)) out[res] = Math.round(n * mul);
+  return out;
+}
+
+// settings: partial world settings (see normalizeSettings); fixed for the life of the world.
+export function createWorld(seed, settings = DEFAULT_SETTINGS) {
+  const cfg = normalizeSettings(settings);
+  const world = worldDims(cfg);
+  const terrain = generateTerrain(seed, cfg);
+  const nodes = generateNodes(seed, terrain, cfg);
   const state = {
-    version: 3, seed, tick: 0, time: (DAY_LENGTH * 6) / 24, lastDay: 1, gold: START.gold, nextId: 1,
-    terrain, nodes: generateNodes(seed, terrain), buildings: [], zones: [], villagers: [],
-    wear: createWear(), events: [], animals: [], fx: [], deerTimer: DEER_RESPAWN_SEC,
+    version: SAVE_VERSION, seed, tick: 0, time: (DAY_LENGTH * 6) / 24, lastDay: 1,
+    gold: START.gold + START_GOLD_BONUS[cfg.startResources], nextId: 1,
+    settings: cfg, world, difficulty: 'normal', territory: createTerritory(world.plots),
+    terrain, nodes, initialNodes: countNodes(nodes), buildings: [], zones: [], villagers: [],
+    wear: createWear(world.grid), events: [], animals: [], fx: [], deerTimer: DEER_RESPAWN_SEC,
     births: 0, deaths: 0, departed: {},
   };
-  const hall = newBuilding(state, 'townhall', SPAWN.x, SPAWN.z, 0);
+  const spawn = spawnOf(state);
+  const hall = newBuilding(state, 'townhall', spawn.x, spawn.z, 0);
   hall.built = true;
   hall.progress = 1;
-  hall.stock = { ...emptyStock(), ...START.stock };
+  hall.stock = { ...emptyStock(), ...scaledStock(START.stock, START_STOCK_MUL[cfg.startResources]) };
   state.buildings.push(hall);
   const rand = mulberry32(seed + 1);
   createStartingVillagers(state, rand, () => {
     const rad = INITIAL_SPREAD * Math.sqrt(rand());
     const ang = rand() * Math.PI * 2;
-    return { x: SPAWN.x + Math.cos(ang) * rad, z: SPAWN.z + Math.sin(ang) * rad };
-  });
+    return { x: spawn.x + Math.cos(ang) * rad, z: spawn.z + Math.sin(ang) * rad };
+  }, START_LAYOUT[cfg.startVillagers]);
   state.animals = createDeer(state);
   pushEvent(state, 'ยินดีต้อนรับสู่หมู่บ้านใหม่ของคุณ เริ่มสร้างโรงตัดไม้และโกดังได้เลย');
   return state;
+}
+
+// Changeable at any time. Returns true if the level was valid.
+export function setDifficulty(state, level) {
+  if (!Object.hasOwn(DIFFICULTY, level)) return false;
+  if (state.difficulty === level) return true;
+  state.difficulty = level;
+  pushEvent(state, `⚙️ เปลี่ยนความยากเป็น${DIFFICULTY[level].name}`);
+  return true;
 }
 
 // ---------- queries ----------
@@ -115,6 +148,8 @@ export function summary(state) {
     unemployed: state.villagers.filter((v) => v.jobId == null && canBuild(v)).length,
     sick: state.villagers.filter((v) => v.sick).length,
     ...populationCounts(state), births: state.births ?? 0, deaths: state.deaths ?? 0,
+    ownedPlots: ownedPlotCount(state), totalPlots: (state.world?.plots ?? 0) ** 2,
+    difficulty: state.difficulty ?? 'normal',
   };
 }
 
@@ -176,8 +211,8 @@ function deliveredMaterials(b) {
   if (b.type === 'cathedral') {
     for (let i = 0; i < b.stage; i++) add(CATHEDRAL_STAGES[i].cost);
     if (b.stage < CATHEDRAL_STAGES.length) add(CATHEDRAL_STAGES[b.stage].cost, b.needed);
-  } else if (b.built) add(BUILDINGS[b.type].cost);
-  else add(BUILDINGS[b.type].cost, b.needed);
+  } else if (b.built) add(b.cost ?? BUILDINGS[b.type].cost);
+  else add(b.cost ?? BUILDINGS[b.type].cost, b.needed);
   return out;
 }
 
@@ -273,11 +308,14 @@ function updateConstruction(state) {
   }
 }
 
-function regrowBerries(state, dt) {
-  const max = NODE_AMOUNT.berry;
+// Once per game second: berries regrow, saplings may become trees, paths fade.
+function slowTick(state, dt) {
+  const max = nodeAmountFor(state.settings, 'berry');
   for (const n of state.nodes) {
     if (n.kind === 'berry' && n.amount < max) n.amount = Math.min(max, n.amount + BERRY_REGROW_PER_SEC * dt);
   }
+  growSaplings(state);
+  decayWear(state.wear, dt);
 }
 
 function assignJobs(state) {
@@ -329,7 +367,6 @@ function stepWorld(state, dt) {
   state.time += dt;
   for (const v of state.villagers) stepVillager(state, v, dt, rand);
   stepAnimals(state, dt, rand);
-  regrowBerries(state, dt);
   updateConstruction(state);
   if (Math.floor(state.time) !== before) {
     processDeaths(state);
@@ -338,10 +375,15 @@ function stepWorld(state, dt) {
     assignHomes(state);
     planHouses(state, rand);
   }
-  decayWear(state.wear, dt);
+  state.slowTimer = (state.slowTimer ?? 0) + dt;
+  if (state.slowTimer >= SLOW_TICK - 1e-9) {
+    slowTick(state, state.slowTimer);
+    state.slowTimer = 0;
+  }
   const day = clock(state).day;
   if (day > state.lastDay) {
     processMidnight(state, rand);
+    processRegrowth(state, mulberry32(((state.seed * 1597334677) ^ Math.floor(state.time)) >>> 0));
     state.lastDay = day;
   }
 }

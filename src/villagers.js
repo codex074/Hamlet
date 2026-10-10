@@ -10,6 +10,9 @@ import {
   distance, nearestStorage, nearestStorageWithAll, nearestFoodStorage, isStorage, addStock, takeStock,
 } from './economy.js';
 import { fertilityAt } from './terrain.js';
+import { nodesNear, getNode, removeNode } from './nodeindex.js';
+import { isOwned } from './territory.js';
+import { difficultyOf } from './settings.js';
 import { clock } from './needs.js';
 import {
   DONE, FAIL, WAIT_SECONDS, getBuilding, gotoPoint, gotoBuilding, firstEntry, planWait, countdown,
@@ -63,12 +66,12 @@ const SHARED_PICKS = 6;   // shared (keepNode) gatherers choose among the neares
 
 function pickNode(state, kind, cx, cz, shared = false, rand = null) {
   const near = [];
-  for (const n of state.nodes) {
-    if (n.kind !== kind || n.amount < 1 || (!shared && n.reserved != null)) continue;
-    const d = distance(n.x, n.z, cx, cz);
-    if (d <= GATHER_RADIUS) near.push({ n, d });
+  for (const n of nodesNear(state, kind, cx, cz, GATHER_RADIUS)) {
+    if (n.amount < 1 || (!shared && n.reserved != null) || !isOwned(state, n.x, n.z)) continue;
+    near.push({ n, d: distance(n.x, n.z, cx, cz) });
   }
-  near.sort((a, b) => a.d - b.d);
+  // ties (equal distance) resolve by id so the choice never depends on bucket order
+  near.sort((a, b) => a.d - b.d || a.n.id - b.n.id);
   if (near.length === 0) return null;
   const pool = shared && rand ? Math.min(SHARED_PICKS, near.length) : 1;
   return near[Math.floor(rand ? rand() * pool : 0) % pool].n;
@@ -94,7 +97,7 @@ export function removeVillager(state, id) {
 export function releaseReservations(state, v) {
   const r = v.res ?? {};
   if (r.nodeId != null) {
-    const node = state.nodes.find((n) => n.id === r.nodeId);
+    const node = getNode(state, r.nodeId);
     if (node && node.reserved === v.id) node.reserved = null;
   }
   if (r.siteId != null && r.siteRes) {
@@ -344,7 +347,7 @@ function execDeliver(state, v, t) {
 }
 
 function execGather(state, v, t, dt) {
-  const node = state.nodes.find((n) => n.id === t.nodeId);
+  const node = getNode(state, t.nodeId);
   if (!node || node.amount < 1) return FAIL;
   if (countdown(t, dt) !== DONE) return undefined;
   v.carry = firstEntry(t.out);
@@ -352,7 +355,7 @@ function execGather(state, v, t, dt) {
   node.amount -= 1;
   node.reserved = null;
   delete v.res.nodeId;
-  if (node.amount <= 0 && node.kind !== 'berry') state.nodes.splice(state.nodes.indexOf(node), 1);
+  if (node.amount <= 0 && node.kind !== 'berry') removeNode(state, node);
   return DONE;
 }
 
@@ -436,7 +439,7 @@ const EXEC = {
 
 export function stepVillager(state, v, dt, rand) {
   v.age = (v.age ?? 30) + dt / DAY_LENGTH;
-  v.hunger = Math.min(1, v.hunger + HUNGER_PER_SEC * dt);
+  v.hunger = Math.min(1, v.hunger + HUNGER_PER_SEC * difficultyOf(state).hunger * dt);
   if (v.hunger >= STARVING_AT && v.homeId != null) {
     const home = getBuilding(state, v.homeId);
     if (home) home.starvedToday = true;

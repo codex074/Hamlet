@@ -1,11 +1,15 @@
 // Planners and task executors for the newer professions: fishing, ranching, hunting, doctor, market.
 // Pure: no DOM, no globals. Wired into villagers.js via JOB_PLANNERS / JOB_EXEC.
 import {
-  CARRY_MAX, CELL, WORLD_SIZE, FISH_RADIUS, HUNT_RADIUS, HUNT_SHOT_DIST, SUPPLY_MAX, HERBS_PER_HEAL,
-  HEAL_TIME, BUILDINGS,
+  CARRY_MAX, CELL, EDGE_MARGIN, FISH_RADIUS, HUNT_RADIUS, HUNT_SHOT_DIST, SUPPLY_MAX, HERBS_PER_HEAL,
+  HEAL_TIME, BUILDINGS, FORESTER_RADIUS, SAPLING_GAP, SAPLING_PATH_WEAR, MAX_SAPLINGS_PER_FORESTER,
 } from './config.js';
 import { distance, nearestStorage, nearestStorageWith } from './economy.js';
 import { isWater } from './terrain.js';
+import { sizeOf } from './world.js';
+import { isOwned } from './territory.js';
+import { addNode, anyNodeWithin, nodesOfKind } from './nodeindex.js';
+import { wearAt } from './wear.js';
 import {
   DONE, FAIL, getBuilding, getVillager, gotoPoint, gotoBuilding, firstEntry, planWait, countdown,
   moveToward, workTime,
@@ -28,13 +32,14 @@ function nextToWater(terrain, x, z) {
 // Land points beside water near the building, nearest first, thinned out by SHORE_SPACING.
 function findShore(state, b) {
   const near = BUILDINGS[b.type].radius + 1;
+  const size = sizeOf(state);
   const cands = [];
   for (let dz = -FISH_RADIUS; dz <= FISH_RADIUS; dz += CELL) {
     for (let dx = -FISH_RADIUS; dx <= FISH_RADIUS; dx += CELL) {
       const x = b.x + dx;
       const z = b.z + dz;
       const d = Math.hypot(dx, dz);
-      if (d > FISH_RADIUS || d < near || x < 0 || z < 0 || x > WORLD_SIZE || z > WORLD_SIZE) continue;
+      if (d > FISH_RADIUS || d < near || x < 0 || z < 0 || x > size || z > size || !isOwned(state, x, z)) continue;
       if (!isWater(state.terrain, x, z) && nextToWater(state.terrain, x, z)) cands.push({ x, z, d });
     }
   }
@@ -85,7 +90,7 @@ function pickDeer(state, b) {
   let best = null;
   let bestD = Infinity;
   for (const a of state.animals ?? []) {
-    if (a.reserved != null) continue;
+    if (a.reserved != null || !isOwned(state, a.x, a.z)) continue;
     const d = distance(a.x, a.z, b.x, b.z);
     if (d <= HUNT_RADIUS && d < bestD) {
       best = a;
@@ -179,8 +184,44 @@ function planDoctor(state, v, b, cfg) {
   staff(v, b);
 }
 
+// ---------- forestry ----------
+
+const PLANT_TRIES = 25;
+
+// Is (x, z) a legal sapling spot? Owned land, dry, clear of nodes/buildings/zones and off the paths.
+function saplingSpotOK(state, x, z) {
+  const size = sizeOf(state);
+  if (x < EDGE_MARGIN || z < EDGE_MARGIN || x > size - EDGE_MARGIN || z > size - EDGE_MARGIN) return false;
+  if (!isOwned(state, x, z) || isWater(state.terrain, x, z)) return false;
+  if (wearAt(state.wear, x, z) >= SAPLING_PATH_WEAR) return false;
+  if (anyNodeWithin(state, x, z, SAPLING_GAP)) return false;
+  for (const o of state.buildings) {
+    if (distance(x, z, o.x, o.z) < BUILDINGS[o.type].radius + SAPLING_GAP) return false;
+  }
+  for (const zone of state.zones) {
+    if (distance(x, z, zone.x, zone.z) < zone.r + SAPLING_GAP) return false;
+  }
+  return true;
+}
+
+function planForester(state, v, b, cfg, rand) {
+  const alive = nodesOfKind(state, 'sapling').filter((n) => n.forester === b.id).length;
+  if (alive >= MAX_SAPLINGS_PER_FORESTER) return planWait(v, null);
+  for (let i = 0; i < PLANT_TRIES; i++) {
+    const rad = FORESTER_RADIUS * Math.sqrt(rand());
+    const ang = rand() * Math.PI * 2;
+    const x = b.x + Math.cos(ang) * rad;
+    const z = b.z + Math.sin(ang) * rad;
+    if (!saplingSpotOK(state, x, z)) continue;
+    v.queue.push(gotoPoint(x, z), { kind: 'plant', bId: b.id, x, z, t: workTime(b, cfg.time) });
+    return;
+  }
+  planWait(v, null);
+}
+
 export const JOB_PLANNERS = {
   fish: planFish, ranch: planRanch, hunt: planHunt, doctor: planDoctor, market: planMarket,
+  forester: planForester,
 };
 
 // ---------- executors ----------
@@ -224,4 +265,18 @@ function execSupply(state, v, t) {
   return DONE;
 }
 
-export const JOB_EXEC = { follow: execFollow, hunt: execHunt, heal: execHeal, supply: execSupply };
+// Plants a sapling where the forester stands (the spot is re-checked: someone may have built there).
+function execPlant(state, v, t, dt) {
+  const b = getBuilding(state, t.bId);
+  if (!b || !b.built) return FAIL;
+  if (countdown(t, dt) !== DONE) return undefined;
+  if (!saplingSpotOK(state, t.x, t.z)) return FAIL;
+  addNode(state, {
+    kind: 'sapling', x: t.x, z: t.z, amount: 1, reserved: null, planted: state.time, forester: b.id,
+  });
+  return DONE;
+}
+
+export const JOB_EXEC = {
+  follow: execFollow, hunt: execHunt, heal: execHeal, supply: execSupply, plant: execPlant,
+};

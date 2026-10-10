@@ -218,6 +218,10 @@ export function createHUD(root, handlers = {}) {
   popChip.chip.addEventListener('mouseenter', () => { popHover = true; showPopTip(); });
   popChip.chip.addEventListener('mouseleave', () => { popHover = false; hideTip(); });
   addChip('happy', '😊', 'ความสุขเฉลี่ย');
+  const terrChip = addChip('terr', '🗺️', 'ดินแดนที่เป็นของคุณ / ทั้งหมด (คลิกเพื่อเปิดมุมมองดินแดน)', 'terr');
+  terrChip.chip.hidden = true;
+  terrChip.chip.style.cursor = 'pointer';
+  terrChip.chip.addEventListener('click', () => toggleTool({ kind: 'territory' }, 'territory'));
   addChip('clock', '☀️', 'เวลา', 'clock');
 
   // ===== tooltip =====
@@ -352,6 +356,20 @@ export function createHUD(root, handlers = {}) {
   demoTab.addEventListener('mouseenter', () => showTip('<b>รื้อถอน</b><br>คลิกอาคารหรือโซนเพื่อรื้อ คืนวัสดุ 50%', demoTab));
   demoTab.addEventListener('mouseleave', hideTip);
 
+  // 🗺️ ดินแดน: territory view (plot grid, buy plots). Hidden until the sim exposes territories.
+  const terrTab = makeTab('territory', '🗺️ ดินแดน');
+  terrTab.classList.add('terr');
+  terrTab.dataset.tool = 'territory';
+  terrTab.hidden = true;
+  terrTab.addEventListener('click', () => { hideTip(); toggleTool({ kind: 'territory' }, 'territory'); });
+  terrTab.addEventListener('mouseenter', () => {
+    const st = lastState;
+    let price = '';
+    try { if (st && typeof sim.plotPrice === 'function') price = `<br><span class="dim">แปลงถัดไปราคา 🪙 ${sim.plotPrice(st)}</span>`; } catch (e) { /* ignore */ }
+    showTip(`<b>ดินแดน</b><br>แสดงเส้นแบ่งแปลง คลิกแปลงที่ติดกับดินแดนของคุณเพื่อซื้อ — วางอาคารและเก็บทรัพยากรได้เฉพาะในดินแดนของคุณ${price}`, terrTab);
+  });
+  terrTab.addEventListener('mouseleave', hideTip);
+
   function renderTabs() {
     for (const t of TAB_DEFS) {
       tabButtons[t.id].classList.toggle('open', openTab === t.id);
@@ -360,6 +378,8 @@ export function createHUD(root, handlers = {}) {
       tabButtons[t.id].classList.toggle('has-active', hasActive);
     }
     demoTab.classList.toggle('active', activeToolId === 'demolish');
+    terrTab.classList.toggle('active', activeToolId === 'territory');
+    terrChip.chip.classList.toggle('on', activeToolId === 'territory');
   }
   renderTabs();
 
@@ -411,6 +431,7 @@ export function createHUD(root, handlers = {}) {
     call('setAutoUpgrade', null, on);
     toast(`อัปเกรดอัตโนมัติทุกหลัง: ${on ? 'เปิด' : 'ปิด'}`);
   });
+  addMenuItem('⚙️ ตั้งค่า', () => call('showSettings'));
   addMenuItem('💾 บันทึกเกม', () => { call('saveGame'); toast('บันทึกเกมแล้ว'); });
   const cloud = !!(handlers && handlers.cloud);
   if (cloud) {
@@ -869,6 +890,39 @@ export function createHUD(root, handlers = {}) {
     renderInfo(lastState || { buildings: [building], gold: 0 });
   }
 
+  // ===== plot purchase card (territory view) =====
+  let plotCard = null;
+  function hidePlotCard() {
+    if (plotCard) plotCard.remove();
+    plotCard = null;
+  }
+  // plot: { px, pz, price }, at: { x, y } client coords, gold: current gold, onBuy(): called on confirm
+  function showPlotCard(plot, at, gold, onBuy) {
+    hidePlotCard();
+    const card = el('div', 'plotcard');
+    card.appendChild(el('div', 'pc-q', `ซื้อแปลงนี้ 🪙${plot.price}?`));
+    const short = (gold || 0) < plot.price;
+    card.appendChild(el('div', `pc-sub${short ? ' short' : ''}`,
+      short ? `ทองไม่พอ (มี ${Math.floor(gold || 0)}, ขาด ${Math.ceil(plot.price - (gold || 0))})` : `แปลง ${plot.px + 1},${plot.pz + 1} · มีทอง ${Math.floor(gold || 0)}`));
+    const row = el('div', 'pc-row');
+    const no = el('button', 'btn', 'ยกเลิก');
+    const yes = el('button', 'btn primary', 'ซื้อ');
+    no.type = yes.type = 'button';
+    yes.disabled = short;
+    no.addEventListener('click', hidePlotCard);
+    yes.addEventListener('click', () => { hidePlotCard(); onBuy(); });
+    row.append(no, yes);
+    card.appendChild(row);
+    card.addEventListener('pointerdown', (e) => e.stopPropagation());
+    root.appendChild(card);
+    const w = card.offsetWidth, h = card.offsetHeight;
+    const x = Math.max(8, Math.min(window.innerWidth - w - 8, (at ? at.x : window.innerWidth / 2) - w / 2));
+    const y = Math.max(8, Math.min(window.innerHeight - h - 8, (at ? at.y : window.innerHeight / 2) - h - 14));
+    card.style.left = `${x}px`;
+    card.style.top = `${y}px`;
+    plotCard = card;
+  }
+
   // ===== events =====
   let eventsSig = '';
   function renderEvents(state) {
@@ -935,10 +989,19 @@ export function createHUD(root, handlers = {}) {
     setText(nums.clock.ic, c.isNight ? '🌙' : '☀️');
     setText(nums.clock.num, `วันที่ ${c.day} · ${pad2(c.hour)}:${pad2(c.minute)}`);
 
+    const hasTerr = typeof sim.plotInfo === 'function' && !!state.territory;
+    terrTab.hidden = !hasTerr;
+    terrChip.chip.hidden = !hasTerr;
+    if (hasTerr) {
+      const own = summary.ownedPlots != null ? summary.ownedPlots : null;
+      const tot = summary.totalPlots != null ? summary.totalPlots : (state.world ? state.world.plots * state.world.plots : null);
+      if (own != null && tot != null) setText(terrChip.num, `${own}/${tot}`);
+    }
+
     refreshButtons(summary, state);
     renderEvents(state);
     renderInfo(state);
   }
 
-  return { update, showInfo, showVillager, toast, setActiveTool, setSpeedDisplay, setSaveStatus };
+  return { update, showInfo, showVillager, toast, setActiveTool, setSpeedDisplay, setSaveStatus, showPlotCard, hidePlotCard };
 }

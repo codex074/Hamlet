@@ -1,10 +1,12 @@
 // Wild deer: spawn in forests, wander, flee from villagers, respawn. Pure: no DOM, no globals.
 import {
-  WORLD_SIZE, EDGE_MARGIN, SPAWN, SPAWN_CLEAR_RADIUS, DEER_COUNT, DEER_RESPAWN_SEC, DEER_SPEED,
+  EDGE_MARGIN, SPAWN_CLEAR_RADIUS, DEER_COUNT, DEER_RESPAWN_SEC, DEER_SPEED,
   BUILDINGS,
 } from './config.js';
 import { mulberry32 } from './rng.js';
 import { isWater } from './terrain.js';
+import { sizeOf, spawnOf } from './world.js';
+import { nodesOfKind } from './nodeindex.js';
 
 const FOREST_RADIUS = 6;       // deer spawn within this distance of a tree
 const FLEE_DIST = 8;
@@ -13,21 +15,29 @@ const WANDER_MAX = 15;
 const EDGE_BAND = 40;          // "near the map edge" for respawns
 const SPAWN_TRIES = 40;
 
-function inBounds(x, z) {
-  return x >= EDGE_MARGIN && x <= WORLD_SIZE - EDGE_MARGIN && z >= EDGE_MARGIN && z <= WORLD_SIZE - EDGE_MARGIN;
+function inBounds(state, x, z) {
+  const size = sizeOf(state);
+  return x >= EDGE_MARGIN && x <= size - EDGE_MARGIN && z >= EDGE_MARGIN && z <= size - EDGE_MARGIN;
 }
 
-function edgeDist(x, z) {
-  return Math.min(x, z, WORLD_SIZE - x, WORLD_SIZE - z);
+function edgeDist(state, x, z) {
+  const size = sizeOf(state);
+  return Math.min(x, z, size - x, size - z);
 }
 
 function isLand(state, x, z) {
-  return inBounds(x, z) && !isWater(state.terrain, x, z);
+  return inBounds(state, x, z) && !isWater(state.terrain, x, z);
+}
+
+// Herd size grows with the map (linearly with its side, so large maps are not swamped).
+export function deerTarget(state) {
+  return Math.round(DEER_COUNT * sizeOf(state) / 240);
 }
 
 // Random land point within FOREST_RADIUS of a tree, away from spawn; null if none found.
 function forestPoint(state, trees, rand, edgeOnly) {
   if (trees.length === 0) return null;
+  const spawn = spawnOf(state);
   for (let i = 0; i < SPAWN_TRIES; i++) {
     const tree = trees[Math.floor(rand() * trees.length) % trees.length];
     const ang = rand() * Math.PI * 2;
@@ -35,8 +45,8 @@ function forestPoint(state, trees, rand, edgeOnly) {
     const x = tree.x + Math.cos(ang) * rad;
     const z = tree.z + Math.sin(ang) * rad;
     if (!isLand(state, x, z)) continue;
-    if (Math.hypot(x - SPAWN.x, z - SPAWN.z) <= SPAWN_CLEAR_RADIUS) continue;
-    if (edgeOnly && edgeDist(x, z) > EDGE_BAND) continue;
+    if (Math.hypot(x - spawn.x, z - spawn.z) <= SPAWN_CLEAR_RADIUS) continue;
+    if (edgeOnly && edgeDist(state, x, z) > EDGE_BAND) continue;
     return { x, z };
   }
   return null;
@@ -49,9 +59,9 @@ function newDeer(state, p) {
 // Initial herd (deterministic per seed). Uses state.nodes, state.terrain and state.nextId.
 export function createDeer(state) {
   const rand = mulberry32(state.seed + 5);
-  const trees = state.nodes.filter((n) => n.kind === 'tree');
+  const trees = nodesOfKind(state, 'tree');
   const deer = [];
-  for (let i = 0; i < DEER_COUNT; i++) {
+  for (let i = 0; i < deerTarget(state); i++) {
     const p = forestPoint(state, trees, rand, false);
     if (p) deer.push(newDeer(state, p));
   }
@@ -121,14 +131,14 @@ function stepDeer(state, d, dt, rand, walkers) {
 }
 
 function respawn(state, dt, rand) {
-  if (state.animals.length >= DEER_COUNT) {
+  if (state.animals.length >= deerTarget(state)) {
     state.deerTimer = DEER_RESPAWN_SEC;
     return;
   }
   state.deerTimer = (state.deerTimer ?? DEER_RESPAWN_SEC) - dt;
   if (state.deerTimer > 0) return;
   state.deerTimer = DEER_RESPAWN_SEC;
-  const trees = state.nodes.filter((n) => n.kind === 'tree');
+  const trees = nodesOfKind(state, 'tree');
   const p = forestPoint(state, trees, rand, true) ?? forestPoint(state, trees, rand, false);
   if (p) state.animals.push(newDeer(state, p));
 }

@@ -12,6 +12,8 @@ import { SPAWN } from './config.js';
 import { createHUD } from './ui/hud.js';
 import { createTools } from './ui/tools.js';
 import { GUIDE } from './ui/guide.js';
+import { createSettingsPanel } from './ui/settings.js';
+import { localWorldScreen } from './ui/screens.js';
 
 const loadingEl = document.getElementById('loading');
 const canvas = document.getElementById('game');
@@ -41,6 +43,18 @@ function webglAvailable() {
   }
 }
 
+const DIFFICULTIES = ['easy', 'normal', 'hard'];
+const randomSeed = () => Math.floor(Math.random() * 2147483646) + 1;
+
+// New world: settings go to createWorld(seed, settings) (older sims ignore the extra argument).
+// The initial difficulty is part of the form's settings but lives on state.difficulty.
+function createNewWorld(seed, settings) {
+  const st = settings && typeof settings === 'object' ? settings : null;
+  const state = sim.createWorld(seed, st || undefined);
+  if (st && DIFFICULTIES.includes(st.difficulty)) state.difficulty = st.difficulty;
+  return state;
+}
+
 function boot(session) {
   const cloud = session.mode === 'cloud';
   if (cloud) document.body.classList.add('cloud');
@@ -60,7 +74,10 @@ function boot(session) {
   let state = null;
   if (cloud) {
     try {
-      state = session.initialSave ? deserialize(session.initialSave) : sim.createWorld(Number(session.village.seed) || (session.village.id * 7919 + 1));
+      // village.settings === null: village made before world settings existed -> small map defaults
+      state = session.initialSave
+        ? deserialize(session.initialSave)
+        : createNewWorld(Number(session.village.seed) || (session.village.id * 7919 + 1), session.village.settings || { mapSize: 'small' });
     } catch (err) {
       console.error(err);
       showFatal(`โหลดหมู่บ้านไม่สำเร็จ: ${err.message || err}`);
@@ -75,7 +92,10 @@ function boot(session) {
     }
   } else {
     state = loadGame();
-    if (!state) state = sim.createWorld(Math.floor(Math.random() * 2147483647) + 1);
+    if (!state) {
+      const w = session.newWorld || {};
+      state = createNewWorld(w.seed || randomSeed(), w.settings || null);
+    }
   }
 
   const terrainView = createTerrainMesh(state.terrain);
@@ -131,6 +151,7 @@ function boot(session) {
   }
 
   let tools = null;
+  let settingsPanel = null;
   const handlers = {
     selectTool: (t) => tools && tools.select(t),
     setSpeed,
@@ -147,6 +168,7 @@ function boot(session) {
       location.reload();
     },
     showHelp: () => showHelp(false),
+    showSettings: () => settingsPanel && settingsPanel.open(),
     cloud,
     backToSelect: () => leaveVillage(() => session.backToSelect()),
     logout: () => leaveVillage(() => session.logout()),
@@ -159,6 +181,12 @@ function boot(session) {
     sim, hud, terrainHeight, pickGround, worldView, cameraController,
   });
   hud.setSpeedDisplay(speed);
+  settingsPanel = createSettingsPanel({
+    root: document.body,
+    getState: () => state,
+    setDifficulty: (level) => (typeof sim.setDifficulty === 'function' ? sim.setDifficulty(state, level) : { ok: false, reason: 'ยังเปลี่ยนความยากไม่ได้' }),
+    toast: (t) => hud.toast(t),
+  });
   if (saver) saver.setStatusListener((s) => hud.setSaveStatus(s.kind, s.text));
 
   // ---------- input ----------
@@ -306,6 +334,16 @@ async function start() {
   } catch (err) {
     console.error(err);
     session = { mode: 'local' };
+  }
+  if (session.mode === 'local' && !loadGame()) {
+    // first run (or after "เกมใหม่"): choose the world before it is generated
+    if (loadingEl) loadingEl.hidden = true;
+    try {
+      session.newWorld = await localWorldScreen();
+    } catch (err) {
+      console.error(err);
+    }
+    if (loadingEl) loadingEl.hidden = false;
   }
   boot(session);
 }

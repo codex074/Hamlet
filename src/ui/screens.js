@@ -1,6 +1,7 @@
 // Pre-game screens for cloud mode: sign in / register, choose a username, pick a village.
 // Plain DOM (player-supplied text is only ever inserted with textContent). Styles live in style.css (.scr-*).
 import * as api from '../net/api.js';
+import { buildWorldForm } from './worldsetup.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_RE = /^[ก-ฺเ-๎a-zA-Z0-9_-]+(?: [ก-ฺเ-๎a-zA-Z0-9_-]+)*$/;
@@ -421,52 +422,43 @@ export function villageSelectScreen({ user }) {
     }
 
     function emptySlot(n) {
-      const c = el('div', 'scr-slot empty');
+      const c = el('div', 'scr-slot empty click');
       c.appendChild(el('div', 'scr-slotno', `หมู่บ้านที่ ${n}`));
-      if (creating !== n) {
-        c.classList.add('click');
-        c.appendChild(el('div', 'scr-plus', '＋'));
-        const b = button('สร้างหมู่บ้านใหม่', 'primary');
-        b.disabled = busy;
-        b.addEventListener('click', () => { creating = n; editing = null; focusSel = '.scr-slot.empty input'; render(); });
-        c.appendChild(b);
-        return c;
-      }
-      const f = el('form', 'scr-form');
-      f.noValidate = true;
-      const input = nameInput('', 'ชื่อหมู่บ้าน (1–30 ตัวอักษร)');
-      const ok = button('สร้าง', 'primary');
-      ok.type = 'submit';
-      const cancel = button('ยกเลิก');
-      const row = el('div', 'scr-btns');
-      row.append(cancel, ok);
-      const e = errorBox();
-      f.append(field('ตั้งชื่อหมู่บ้าน', input), e, row);
-      cancel.addEventListener('click', () => { creating = null; render(); });
-      f.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        if (busy) return;
-        const name = input.value.trim();
-        if (!name) return e.show('กรุณาตั้งชื่อหมู่บ้าน');
-        if (name.length > 30) return e.show('ชื่อยาวเกินไป (ไม่เกิน 30 ตัวอักษร)');
-        busy = true;
-        ok.disabled = cancel.disabled = input.disabled = true;
-        ok.textContent = 'กำลังสร้าง…';
-        try {
-          const res = await api.post('/api/villages', { name });
-          busy = false;
-          creating = null;
-          await play(res.village);
-        } catch (er) {
-          busy = false;
-          if (er.status === 401) { reject(er); return; }
-          ok.disabled = cancel.disabled = input.disabled = false;
-          ok.textContent = 'สร้าง';
-          e.show(er.message);
-        }
-      });
-      c.appendChild(f);
+      c.appendChild(el('div', 'scr-plus', '＋'));
+      const b = button('สร้างหมู่บ้านใหม่', 'primary');
+      b.disabled = busy;
+      b.addEventListener('click', () => openCreate(n));
+      c.appendChild(b);
       return c;
+    }
+
+    // World settings form replaces the list until the village is created (or cancelled).
+    function openCreate(n) {
+      if (busy) return;
+      creating = n;
+      editing = null;
+      const form = buildWorldForm({
+        title: 'สร้างหมู่บ้านใหม่',
+        subtitle: `หมู่บ้านที่ ${n} — เลือกแผนที่และกติกา`,
+        withName: true,
+        submitLabel: 'สร้างและเริ่มเล่น',
+        onCancel: () => { creating = null; setCard(wrapEl); render(); },
+        onSubmit: async ({ name, settings, seed }) => {
+          let res;
+          try {
+            res = await api.createVillage(name, settings, seed);
+          } catch (er) {
+            if (er.status === 401) { reject(er); return; }
+            throw er;
+          }
+          creating = null;
+          villages = [...villages, res.village];
+          setCard(wrapEl);
+          await play(res.village);
+        },
+      });
+      setCard(form);
+      setTimeout(() => form.focusFirst(), 50);
     }
 
     function filledSlot(v, n) {
@@ -588,9 +580,6 @@ export function villageSelectScreen({ user }) {
       if (focusSel) {
         const f = grid.querySelector(focusSel);
         if (f) setTimeout(() => f.focus(), 20);
-      } else if (creating != null) {
-        const f = grid.querySelector('.scr-slot.empty input');
-        if (f) setTimeout(() => f.focus(), 20);
       }
     }
 
@@ -634,4 +623,20 @@ export function fatalScreen(message, { actionLabel = 'กลับไปเล�
   b.addEventListener('click', () => { if (onAction) onAction(); });
   card.appendChild(b);
   setCard(card);
+}
+
+// ====================================================================
+// Local mode: world settings for a brand-new game. Resolves { settings, seed } (seed null = random).
+// ====================================================================
+export function localWorldScreen() {
+  return new Promise((resolve) => {
+    const form = buildWorldForm({
+      title: 'เริ่มเกมใหม่',
+      subtitle: 'เลือกแผนที่และกติกาของหมู่บ้าน — กำหนดตอนสร้างเท่านั้น',
+      submitLabel: 'เริ่มเล่น',
+      onSubmit: async ({ settings, seed }) => { closeScreens(); resolve({ settings, seed }); },
+    });
+    setCard(form);
+    setTimeout(() => form.focusFirst(), 50);
+  });
 }

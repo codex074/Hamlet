@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { world as createWorld } from './helpers.js';
 import {
-  createWorld, tick, canPlace, placeBuilding, paintZone, canPaintZone, removeAt, setDesiredWorkers,
+  tick, canPlace, placeBuilding, paintZone, canPaintZone, removeAt, setDesiredWorkers,
   buildingAt, isUnlocked, summary, clock,
 } from '../src/sim.js';
 import { serialize, deserialize } from '../src/save.js';
@@ -15,7 +16,7 @@ import {
 
 test('createWorld basics', () => {
   const s = createWorld(1);
-  assert.equal(s.version, 3);
+  assert.equal(s.version, 4);
   const hall = townhall(s);
   assert.deepEqual([hall.x, hall.z, hall.built], [SPAWN.x, SPAWN.z, true]);
   assert.equal(s.villagers.length, START.villagers);
@@ -219,8 +220,8 @@ test('summary fields', () => {
   const s = world();
   const sum = summary(s);
   assert.deepEqual(Object.keys(sum).sort(),
-    ['adults', 'births', 'children', 'day', 'deaths', 'elders', 'gold', 'happiness', 'homeless', 'hour',
-      'housing', 'isNight', 'pop', 'pregnant', 'sick', 'stock', 'unemployed']);
+    ['adults', 'births', 'children', 'day', 'deaths', 'difficulty', 'elders', 'gold', 'happiness', 'homeless', 'hour',
+      'housing', 'isNight', 'ownedPlots', 'pop', 'pregnant', 'sick', 'stock', 'totalPlots', 'unemployed']);
   assert.deepEqual([sum.adults, sum.children, sum.elders, sum.pregnant, sum.births, sum.deaths], [8, 0, 0, 0, 0, 0]);
   assert.equal(sum.pop, 8);
   assert.equal(sum.homeless, 8);

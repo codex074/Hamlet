@@ -9,6 +9,7 @@ import {
 import { mulberry32, randRange, randInt } from './rng.js';
 import { pickGivenName, pickSurname, fullName } from './names.js';
 import { pushEvent } from './events.js';
+import { difficultyOf } from './settings.js';
 import { createVillager, removeVillager } from './villagers.js';
 import { stageOf, canWork, canBuild, canTakeJob } from './taskutil.js';
 
@@ -69,16 +70,16 @@ function spawnCouple(state, place, rand, ageRange, surname) {
   return [h, w];
 }
 
-// Founding villagers: START.couples married couples (distinct surnames) + START.singles single adults.
-export function createStartingVillagers(state, rand, place) {
+// Founding villagers: layout.couples married couples (distinct surnames) + layout.singles single adults.
+export function createStartingVillagers(state, rand, place, layout = START) {
   const out = [];
   const used = [];
-  for (let i = 0; i < START.couples; i++) {
+  for (let i = 0; i < layout.couples; i++) {
     const surname = pickSurname(rand, used);
     used.push(surname);
     out.push(...spawnCouple(state, place, rand, START_AGE.couple, surname));
   }
-  for (let i = 0; i < START.singles; i++) {
+  for (let i = 0; i < layout.singles; i++) {
     const p = place();
     out.push(createVillager(state, p.x, p.z, {
       gender: i % 2 === 0 ? 'm' : 'f', age: randRange(rand, ...START_AGE.single),
@@ -337,7 +338,7 @@ export function processPregnancies(state, rand) {
   }
   for (const w of state.villagers) {
     if (!canConceive(state, w, people)) continue;
-    if (rand() >= PREGNANCY_CHANCE) continue;
+    if (rand() >= PREGNANCY_CHANCE * difficultyOf(state).pregnancy) continue;
     w.pregnant = true;
     w.pregnantDays = 0;
     w.pregnantBy = w.spouseId;

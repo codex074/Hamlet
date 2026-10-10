@@ -5,7 +5,7 @@ export const GRID = 120;                // heightmap / wear / fertility cells pe
 export const CELL = WORLD_SIZE / GRID;  // 2 m
 export const MAX_HEIGHT = 14;
 export const RIVER_WIDTH = 8;
-export const SPAWN = { x: WORLD_SIZE / 2, z: WORLD_SIZE / 2 };
+export const SPAWN = { x: WORLD_SIZE / 2, z: WORLD_SIZE / 2 };   // small-map centre; use spawnOf(state) for the real one
 export const SPAWN_CLEAR_RADIUS = 25;
 export const EDGE_MARGIN = 4;
 export const MAX_SLOPE = 2.5;           // max height difference under a footprint
@@ -85,6 +85,8 @@ export const BUILDINGS = {
                 workers: 1, job: 'hunt', output: { meat: 3 }, time: 4, unlockPop: 8 },
   herbalist:  { name: 'คนเก็บสมุนไพร', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
                 workers: 1, job: 'gather', node: 'tree', keepNode: true, output: { herbs: 1 }, time: 7, unlockPop: 10, light: true },
+  forester:   { name: 'คนปลูกป่า', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
+                workers: 1, job: 'forester', time: 6, unlockPop: 8, light: true },
   sheepfarm:  { name: 'คอกแกะ', category: 'resource', radius: 7, cost: { wood: 15, planks: 6 }, buildTime: 35,
                 workers: 2, job: 'ranch', outputs: [{ meat: 2 }, { wool: 2 }], time: 9, unlockPop: 15 },
   ironmine:   { name: 'เหมืองแร่เหล็ก', category: 'resource', radius: 4.5, cost: { wood: 15, planks: 8 }, buildTime: 35,
@@ -194,3 +196,61 @@ export const PARENT_MIN_GAP = 16;           // save migration: parent must be th
 
 export const ZONE_BRUSH = { min: 6, max: 14, default: 9 };
 export const HOUSE_SITE_TRIES = 30;
+
+// ---------- world settings (fixed at creation), territories, difficulty, regrowth ----------
+// WORLD_SIZE / GRID above are the small-map defaults (and what pre-v4 saves use); every world carries its own dims.
+export const MAP_SIZES = { small: 240, medium: 400, large: 560 };   // metres
+export const PLOT_SIZE = 80;                                          // metres per territory plot
+export const DENSITY_MUL = { low: 0.5, normal: 1, high: 1.7 };         // node counts
+export const AMOUNT_MUL = { low: 0.7, normal: 1, high: 1.4 };          // node amounts
+export const TERRAIN_AMP = { flat: 0.4, normal: 1, hilly: 1.7 };       // height amplitude
+export const HILLY_ORE_MUL = 1.3;                                      // extra ore veins on hilly maps
+export const START_STOCK_MUL = { low: 0.5, normal: 1, high: 2 };
+export const START_GOLD_BONUS = { low: 0, normal: 0, high: 100 };
+export const START_LAYOUT = {                                          // startVillagers -> founders
+  4: { couples: 1, singles: 2 },
+  8: { couples: 3, singles: 2 },
+  12: { couples: 5, singles: 2 },
+};
+export const RIVER_MIN_SPAWN_DIST = 40;   // water never closer than this to the map centre
+
+export const DEFAULT_SETTINGS = {
+  mapSize: 'medium',
+  forest: 'normal', stone: 'normal', berries: 'normal', ore: 'normal',
+  terrain: 'normal',
+  rivers: 1,
+  startResources: 'normal',
+  startVillagers: 8,
+  regrowth: 'normal',
+};
+export const SETTINGS_OPTIONS = {
+  mapSize: ['small', 'medium', 'large'],
+  forest: ['low', 'normal', 'high'], stone: ['low', 'normal', 'high'],
+  berries: ['low', 'normal', 'high'], ore: ['low', 'normal', 'high'],
+  terrain: ['flat', 'normal', 'hilly'],
+  rivers: [0, 1, 2, 3],
+  startResources: ['low', 'normal', 'high'],
+  startVillagers: [4, 8, 12],
+  regrowth: ['off', 'slow', 'normal'],
+};
+
+export const START_PLOTS = 3;             // the 3x3 plots around the centre start owned
+export const PLOT_BASE_PRICE = 80;
+export const PLOT_PRICE_GROWTH = 1.35;
+
+// Multipliers, changeable any time via setDifficulty. cost = construction cost of NEW placements.
+export const DIFFICULTY = {
+  easy:   { name: 'ง่าย',  hunger: 0.75, sickness: 0.5, immigration: 1.4, pregnancy: 1.3, cost: 0.75, tax: 1.2 },
+  normal: { name: 'ปกติ',  hunger: 1,    sickness: 1,   immigration: 1,   pregnancy: 1,   cost: 1,    tax: 1 },
+  hard:   { name: 'ยาก',   hunger: 1.25, sickness: 1.5, immigration: 0.7, pregnancy: 0.8, cost: 1.25, tax: 0.85 },
+};
+
+// Regrowth
+export const FORESTER_RADIUS = 30;
+export const SAPLING_GROW_DAYS = 2;
+export const MAX_SAPLINGS_PER_FORESTER = 40;
+export const SAPLING_GAP = 2.5;           // forester plants this far from other nodes/buildings/zones
+export const SAPLING_PATH_WEAR = 0.3;     // never plant on worn paths
+export const REGROW_TREE_RATE = { slow: 0.005, normal: 0.015 };   // share of initial trees per midnight
+export const REGROW_ROCK_BELOW = 0.6;     // respawn rocks/ore while count < this share of the initial count
+export const REGROW_ROCK_EVERY = { slow: 3, normal: 1 };          // days between rock/ore respawns

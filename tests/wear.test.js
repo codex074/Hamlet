@@ -29,7 +29,7 @@ test('addWear leaves neighbouring cells untouched', () => {
   const wear = createWear();
   const { x, z } = centre(10, 20);
   addWear(wear, x, z, 0.5);
-  const i = cellIndex(x, z);
+  const i = cellIndex(wear, x, z);
   let nonZero = 0;
   for (let k = 0; k < wear.length; k++) if (wear[k] !== 0) nonZero++;
   assert.equal(nonZero, 1);
@@ -41,21 +41,22 @@ test('addWear leaves neighbouring cells untouched', () => {
 });
 
 test('cellIndex is row-major and maps world coords to cells', () => {
-  assert.equal(cellIndex(0, 0), 0);
-  assert.equal(cellIndex(3 * CELL + 0.1, 2 * CELL + 0.1), 2 * GRID + 3);
-  assert.equal(cellIndex(CELL - 0.01, 0), 0);
-  assert.equal(cellIndex(CELL, 0), 1);
+  const wear = createWear();
+  assert.equal(cellIndex(wear, 0, 0), 0);
+  assert.equal(cellIndex(wear, 3 * CELL + 0.1, 2 * CELL + 0.1), 2 * GRID + 3);
+  assert.equal(cellIndex(wear, CELL - 0.01, 0), 0);
+  assert.equal(cellIndex(wear, CELL, 0), 1);
 });
 
 test('out-of-range coordinates clamp to edge cells', () => {
   const last = GRID * GRID - 1;
-  assert.equal(cellIndex(-5, -5), 0);
-  assert.equal(cellIndex(-1e6, 1e6), (GRID - 1) * GRID);
-  assert.equal(cellIndex(1e6, -1e6), GRID - 1);
-  assert.equal(cellIndex(1e6, 1e6), last);
-  assert.equal(cellIndex(WORLD_SIZE, WORLD_SIZE), last);
-
   const wear = createWear();
+  assert.equal(cellIndex(wear, -5, -5), 0);
+  assert.equal(cellIndex(wear, -1e6, 1e6), (GRID - 1) * GRID);
+  assert.equal(cellIndex(wear, 1e6, -1e6), GRID - 1);
+  assert.equal(cellIndex(wear, 1e6, 1e6), last);
+  assert.equal(cellIndex(wear, WORLD_SIZE, WORLD_SIZE), last);
+
   addWear(wear, -100, -100, 0.5);
   assert.equal(wear[0], 0.5);
   addWear(wear, 1e6, 1e6, 0.25);
@@ -94,7 +95,7 @@ test('speedMultiplier is 1 at wear 0 and full bonus at wear 1', () => {
 test('speedMultiplier is monotonic non-decreasing in wear', () => {
   const wear = createWear();
   const { x, z } = centre(7, 7);
-  const i = cellIndex(x, z);
+  const i = cellIndex(wear, x, z);
   let prev = -Infinity;
   for (let k = 0; k <= 100; k++) {
     wear[i] = k / 100;

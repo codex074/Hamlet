@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { world as createWorld } from './helpers.js';
 import { mulberry32 } from '../src/rng.js';
-import { createWorld, tick, summary, villagerAt, villagerInfo, household } from '../src/sim.js';
+import { tick, summary, villagerAt, villagerInfo, household } from '../src/sim.js';
 import { processMidnight, assignHomes, planHouses } from '../src/needs.js';
 import {
   processDeaths, processMarriages, processPregnancies, leaveHome, spawnImmigrantGroup, packUnits,
@@ -64,7 +65,7 @@ test('names: enough Thai-script male, female and family names', () => {
 
 test('light flag marks the elder-friendly buildings', () => {
   const light = Object.entries(BUILDINGS).filter(([, b]) => b.light).map(([k]) => k).sort();
-  assert.deepEqual(light, ['bakery', 'chapel', 'forager', 'herbalist', 'infirmary', 'market', 'tavern', 'weaver']);
+  assert.deepEqual(light, ['bakery', 'chapel', 'forager', 'forester', 'herbalist', 'infirmary', 'market', 'tavern', 'weaver']);
 });
 
 test('start: 3 married couples with distinct surnames + 2 single adults, all with names and death ages', () => {
@@ -691,7 +692,7 @@ test('v3 saves round-trip the family data', () => {
   s.departed = { 7: 'x y' };
   f.daughterInLaw.pregnant = true;
   const copy = deserialize(serialize(s));
-  assert.equal(copy.version, 3);
+  assert.equal(copy.version, 4);
   assert.deepEqual(copy.villagers.find((v) => v.id === f.grandkid.id).parents, [f.daughterInLaw.id, f.son.id]);
   assert.equal(copy.villagers.find((v) => v.id === f.daughterInLaw.id).pregnant, true);
   assert.deepEqual([copy.births, copy.deaths, copy.departed[7]], [4, 2, 'x y']);
@@ -721,7 +722,7 @@ test('v2 saves migrate to v3: genders, ages, names, couples, children', () => {
   }
   delete data.births; delete data.deaths; delete data.departed;
   const m = deserialize(JSON.stringify(data));
-  assert.equal(m.version, 3);
+  assert.equal(m.version, 4);
   assert.deepEqual([m.births, m.deaths], [0, 0]);
   const byId = new Map(m.villagers.map((v) => [v.id, v]));
   for (const v of m.villagers) {

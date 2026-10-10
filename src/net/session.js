@@ -181,6 +181,19 @@ async function chooseSave(village, serverSave) {
   return { save: serverSave, dirty: false };
 }
 
+// village.settings arrives as an object (or null for villages created before world settings existed);
+// tolerate a JSON string too. null -> the save migration / sim defaults decide.
+function parseSettings(raw) {
+  if (raw && typeof raw === 'object') return raw;
+  if (typeof raw === 'string') {
+    try {
+      const o = JSON.parse(raw);
+      if (o && typeof o === 'object') return o;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
 // ---------- entry point ----------
 export async function startSession() {
   const p = await probe();
@@ -200,6 +213,7 @@ export async function startSession() {
         continue;
       }
       const { village, save } = choice;
+      village.settings = parseSettings(village.settings);
       const picked = await chooseSave(village, save);
       closeScreens();
       return {

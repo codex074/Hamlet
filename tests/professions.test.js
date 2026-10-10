@@ -14,7 +14,7 @@ import {
 } from '../src/config.js';
 import {
   world, townhall, addBuilt, addHouse, addStaffedService, addVillager, clearVillagers, findPlaceSpot,
-  spiral, SPAWN,
+  spiral, SPAWN, SMALL,
 } from './helpers.js';
 
 function runSteps(state, v, seconds, rand = mulberry32(5)) {
@@ -206,8 +206,8 @@ test('herbalist brings herbs without using up trees', () => {
 
 test('ore veins sit on high ground, deterministic, spaced apart', () => {
   for (const seed of [1, 2, 5]) {
-    const t = generateTerrain(seed);
-    const ore = generateNodes(seed, t).filter((n) => n.kind === 'ore');
+    const t = generateTerrain(seed, SMALL);
+    const ore = generateNodes(seed, t, SMALL).filter((n) => n.kind === 'ore');
     assert.equal(ore.length, NODE_COUNTS.ore, `seed ${seed}`);
     for (const n of ore) {
       assert.ok(heightAt(t, n.x, n.z) >= ORE_MIN_HEIGHT * MAX_HEIGHT - 1e-9, `seed ${seed} height`);
@@ -218,7 +218,7 @@ test('ore veins sit on high ground, deterministic, spaced apart', () => {
         assert.ok(Math.hypot(ore[i].x - ore[j].x, ore[i].z - ore[j].z) >= 6);
       }
     }
-    assert.deepEqual(generateNodes(seed, t).filter((n) => n.kind === 'ore'), ore);
+    assert.deepEqual(generateNodes(seed, t, SMALL).filter((n) => n.kind === 'ore'), ore);
   }
 });
 

@@ -40,6 +40,9 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
   // demolish tool
   let hoverId = null;
 
+  // territory view
+  let terrSig = '';
+
   // click tracking
   let downInfo = null;     // { x, y, button }
 
@@ -206,12 +209,65 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
     lastPaint = null;
     hoverId = null;
     worldView.setHighlight(null);
+    if (current && current.kind === 'territory') setTerritory(false);
+    if (hud.hidePlotCard) hud.hidePlotCard();
+  }
+
+  // ---------- territory view ----------
+  const territoryOk = () => typeof sim.plotInfo === 'function' && typeof worldView.setTerritoryView === 'function';
+  const signature = (state) => (state.territory ? `${state.territory.bought}|${(state.territory.owned || []).join('')}` : '');
+
+  function setTerritory(on) {
+    if (typeof worldView.setTerritoryView !== 'function') return;
+    const state = getState();
+    try {
+      worldView.setTerritoryView(on, on && typeof sim.plotInfo === 'function' ? sim.plotInfo(state) : null);
+    } catch (err) {
+      console.error(err);
+    }
+    terrSig = on ? signature(state) : '';
+  }
+
+  function plotAt(state, g) {
+    if (!g || typeof sim.plotInfo !== 'function') return null;
+    return sim.plotInfo(state).find((p) => g.x >= p.x0 && g.x < p.x1 && g.z >= p.z0 && g.z < p.z1) || null;
+  }
+
+  function territoryClick(e) {
+    const state = getState();
+    const p = plotAt(state, ground);
+    if (!p) { if (hud.hidePlotCard) hud.hidePlotCard(); return; }
+    if (p.owned) {
+      if (hud.hidePlotCard) hud.hidePlotCard();
+      hud.toast('แปลงนี้เป็นของคุณแล้ว');
+      return;
+    }
+    if (!p.buyable) {
+      if (hud.hidePlotCard) hud.hidePlotCard();
+      hud.toast('ซื้อได้เฉพาะแปลงที่ติดกับดินแดนของคุณ');
+      return;
+    }
+    if (!hud.showPlotCard) return;
+    hud.showPlotCard(p, { x: e.clientX, y: e.clientY }, state.gold, () => {
+      const r = sim.buyPlot(state, p.px, p.pz);
+      if (r && r.ok) {
+        hud.toast('🗺️ ซื้อดินแดนใหม่แล้ว');
+        setTerritory(true);   // redraw: new owner, next prices, new buyable plots
+      } else {
+        hud.toast((r && r.reason) || 'ซื้อแปลงนี้ไม่ได้');
+      }
+    });
   }
 
   function select(tool) {
     cleanupCurrent();
     current = tool || null;
-    cameraController.setPanWithLeftMouse(!current);
+    cameraController.setPanWithLeftMouse(!current || current.kind === 'territory');
+    if (current && current.kind === 'territory' && !territoryOk()) {
+      current = null;
+      cameraController.setPanWithLeftMouse(true);
+      hud.toast('ยังไม่รองรับระบบดินแดน');
+    }
     if (current) {
       if (selectedId != null || selectedVid != null) clearSelection();
       if (current.kind === 'build') {
@@ -223,6 +279,8 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
         }
       } else if (current.kind === 'zone') {
         zoneRing = makeRing(0.7);
+      } else if (current.kind === 'territory') {
+        setTerritory(true);
       }
     }
     hud.setActiveTool(toolId(current));
@@ -356,6 +414,11 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
       if (isClick && current) select(null);
       return;
     }
+    if (e.button === 0 && current && current.kind === 'territory' && isClick) {
+      setPointer(e);
+      territoryClick(e);
+      return;
+    }
     if (e.button === 0 && !current && isClick) {
       setPointer(e);
       const state = getState();
@@ -410,6 +473,7 @@ export function createTools({ THREE, scene, camera, canvas, getState, sim, hud, 
 
   function update(dt) {
     const state = getState();
+    if (current && current.kind === 'territory' && signature(state) !== terrSig) setTerritory(true);
     if (selectedId != null && !state.buildings.some((b) => b.id === selectedId)) {
       selectedId = null;
       worldView.setHighlight(null);

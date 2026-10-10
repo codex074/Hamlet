@@ -67,3 +67,11 @@ export const post = (path, body, opts) => request('POST', path, body, opts);
 export const put = (path, body, opts) => request('PUT', path, body, opts);
 export const patch = (path, body, opts) => request('PATCH', path, body, opts);
 export const del = (path, opts) => request('DELETE', path, undefined, opts);
+
+// Create a village with its world settings; `seed` (positive int) is optional - the server picks one when omitted.
+export function createVillage(name, settings, seed) {
+  const body = { name };
+  if (settings && typeof settings === 'object') body.settings = settings;
+  if (Number.isInteger(seed) && seed > 0) body.seed = seed;
+  return post('/api/villages', body);
+}

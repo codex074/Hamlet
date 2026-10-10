@@ -1,8 +1,11 @@
 // Free (grid-less) placement checks for circular footprints and zones. Pure: no DOM, no globals.
 import {
-  WORLD_SIZE, EDGE_MARGIN, MAX_SLOPE, BUILDINGS, HOUSE_SITE_TRIES, NEAR_WATER_DIST, CELL,
+  EDGE_MARGIN, MAX_SLOPE, BUILDINGS, HOUSE_SITE_TRIES, NEAR_WATER_DIST, CELL,
 } from './config.js';
 import { heightAt, isWater } from './terrain.js';
+import { sizeOf } from './world.js';
+import { circleOwned } from './territory.js';
+import { nodesWithin } from './nodeindex.js';
 
 const DEFAULT_GEO = { heightAt, isWater };
 const WATERSIDE_SLOPE_MUL = 2.5;
@@ -19,9 +22,11 @@ export function samplePoints(x, z, r) {
   return pts;
 }
 
-function inBounds(x, z, r) {
+const NOT_OWNED = { ok: false, reason: 'อยู่นอกดินแดนของคุณ' };
+
+function inBounds(state, x, z, r) {
   const lo = EDGE_MARGIN;
-  const hi = WORLD_SIZE - EDGE_MARGIN;
+  const hi = sizeOf(state) - EDGE_MARGIN;
   return x - r >= lo && x + r <= hi && z - r >= lo && z + r <= hi;
 }
 
@@ -30,7 +35,8 @@ function dist(ax, az, bx, bz) {
 }
 
 export function footprintOK(state, x, z, r, opts = {}, geo = DEFAULT_GEO) {
-  if (!inBounds(x, z, r)) return { ok: false, reason: 'นอกแผนที่' };
+  if (!inBounds(state, x, z, r)) return { ok: false, reason: 'นอกแผนที่' };
+  if (!circleOwned(state, x, z, r)) return NOT_OWNED;
   const pts = samplePoints(x, z, r);
   if (pts.some(([px, pz]) => geo.isWater(state.terrain, px, pz))) {
     return { ok: false, reason: 'อยู่บนน้ำ' };
@@ -75,7 +81,8 @@ export function canPlace(state, type, x, z, rot, geo = DEFAULT_GEO) {
 }
 
 export function canPaintZone(state, kind, x, z, r, geo = DEFAULT_GEO) {
-  if (!inBounds(x, z, r)) return { ok: false, reason: 'นอกแผนที่' };
+  if (!inBounds(state, x, z, r)) return { ok: false, reason: 'นอกแผนที่' };
+  if (!circleOwned(state, x, z, r)) return NOT_OWNED;
   if (geo.isWater(state.terrain, x, z)) return { ok: false, reason: 'อยู่บนน้ำ' };
   for (const b of state.buildings) {
     if (b.type === 'house') continue;
@@ -92,9 +99,7 @@ export function canPaintZone(state, kind, x, z, r, geo = DEFAULT_GEO) {
 }
 
 export function nodesUnder(state, x, z, r) {
-  return state.nodes
-    .filter((n) => dist(x, z, n.x, n.z) < r + NODE_PAD)
-    .map((n) => n.id);
+  return nodesWithin(state, x, z, r + NODE_PAD).map((n) => n.id);
 }
 
 export function findHouseSite(state, zone, rand, geo = DEFAULT_GEO) {
