@@ -104,6 +104,7 @@ export const IMMIGRATION_MAX_HOMELESS = 6;
 export const LEAVE_HAPPINESS = 0.25;
 export const LEAVE_AFTER_DAYS = 2;
 export const REFUND_RATIO = 0.5;
+export const BUILDER_RESERVE = 3;      // villagers kept job-free while construction sites exist
 
 export const START = {
   villagers: 8,
