@@ -1,7 +1,7 @@
 // Needs, happiness, taxes, house upgrades, immigration and housing. Pure: no DOM, no globals.
 import {
   DAY_LENGTH, NIGHT_START, NIGHT_END, BUILDINGS, HOUSE_LEVELS, SERVICE_STAFFED_DIST,
-  IMMIGRATION_MIN_HAPPINESS, IMMIGRATION_MAX_HOMELESS, LEAVE_HAPPINESS, LEAVE_AFTER_DAYS,
+  IMMIGRATION_MIN_HAPPINESS, IMMIGRATION_MAX_HOMELESS, LEAVE_HAPPINESS, LEAVE_AFTER_DAYS, NEED_INFO,
   EDGE_MARGIN, FOODS, CLOTH_PER_HOUSE_PER_DAY, TOOLS_PER_BUILDING_PER_DAY,
 } from './config.js';
 import { mulberry32 } from './rng.js';
@@ -16,6 +16,8 @@ import {
   processDeaths, processFamilies, spawnImmigrantGroup, homelessUnits, packUnits, attachToFamily,
 } from './families.js';
 import { stageOf } from './taskutil.js';
+import { fullName } from './names.js';
+import { foodSummary } from './status.js';
 import { sizeOf, spawnOf } from './world.js';
 import { removeNode, getNode } from './nodeindex.js';
 import { difficultyOf } from './settings.js';
@@ -153,9 +155,59 @@ function updateUnhappiness(state, house) {
   const byId = new Map(state.villagers.map((v) => [v.id, v]));
   const grown = house.residents.filter((id) => byId.has(id) && stageOf(byId.get(id)) !== 'child');
   const pool = grown.length > 0 ? grown : house.residents;
+  const leaver = byId.get(pool[pool.length - 1]);
+  const missing = unmetNeeds(state, house);
+  const who = leaver ? fullName(leaver) : 'ชาวบ้านคนหนึ่ง';
+  const level = HOUSE_LEVELS[house.level - 1];
+  pushEvent(state, `😞 ${who} ย้ายออก — ขาด${missing.map((m) => m.name).join(', ') || 'ความสุข'}`, {
+    kind: 'warn', bId: house.id, x: house.x, z: house.z,
+    detail: `บ้านระดับ ${house.level} (${level.name}) มีความสุข ${Math.round(house.happiness * 100)}% `
+      + `ต่ำกว่า ${Math.round(LEAVE_HAPPINESS * 100)}% ติดกัน ${house.unhappyDays} วัน`
+      + (missing.length ? ` · ${missing.map((m) => `${m.name}: ${m.why}`).join(' · ')}` : ''),
+  });
   removeVillager(state, pool[pool.length - 1]);
   house.unhappyDays = 0;
-  pushEvent(state, 'ชาวบ้านคนหนึ่งย้ายออกจากหมู่บ้านเพราะไม่พอใจ');
+}
+
+// Needs of the house's current level that were not met, each with a concrete reason.
+export function unmetNeeds(state, house) {
+  const level = HOUSE_LEVELS[house.level - 1];
+  const met = house.needsMet || {};
+  const out = [];
+  for (const key of level.needs) {
+    if (met[key]) continue;
+    out.push({ key, name: NEED_INFO[key] ?? key, why: needReason(state, house, key) });
+  }
+  return out;
+}
+
+function needReason(state, house, key) {
+  const service = (svc, building) => {
+    const any = state.buildings.some((b) => b.built && BUILDINGS[b.type].service === svc);
+    if (!any) return `ยังไม่มี${building}`;
+    return `ไม่มี${building}ที่มีคนประจำ${svc === 'health' || svc === 'clothing' ? 'และของพร้อม' : ''}ในระยะ`;
+  };
+  switch (key) {
+    case 'food': {
+      const f = foodSummary(state, totalStock(state));
+      if (f.net < 0) {
+        return `ผลิตอาหารได้ ${f.inPerDay}/วัน แต่ชาวบ้าน ${state.villagers.length} คนต้องการราว ${f.demandPerDay}/วัน — สร้างคนเก็บของป่า ท่าประมง หรือนักล่าเพิ่ม`;
+      }
+      if (f.stock <= 0) return 'คลังอาหารหมด มีคนในบ้านหิวจนเกือบอด';
+      return 'มีคนในบ้านหิวจนเกือบอด — โกดังที่มีอาหารอาจอยู่ไกลจากบ้านเกินไป ลองสร้างโกดังใกล้ย่านบ้าน';
+    }
+    case 'variety2':
+    case 'variety3': {
+      const n = (house.foodsToday ?? []).length;
+      return `กินอาหารได้ ${n} ชนิด ต้องการ ${key === 'variety2' ? 2 : 3} ชนิด`;
+    }
+    case 'religion': return service('religion', 'โบสถ์');
+    case 'entertainment': return service('entertainment', 'โรงเตี๊ยม');
+    case 'health': return service('health', 'สถานพยาบาล');
+    case 'clothing': return service('clothing', 'ตลาด');
+    case 'cathedral': return 'มหาวิหารยังสร้างไม่เสร็จ';
+    default: return 'ยังไม่ได้รับ';
+  }
 }
 
 // Covering market with cloth in stock for this house, or null.

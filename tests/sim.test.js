@@ -220,7 +220,7 @@ test('summary fields', () => {
   const s = world();
   const sum = summary(s);
   assert.deepEqual(Object.keys(sum).sort(),
-    ['adults', 'births', 'children', 'day', 'deaths', 'difficulty', 'elders', 'gold', 'happiness', 'homeless', 'hour',
+    ['adults', 'births', 'children', 'day', 'deaths', 'difficulty', 'elders', 'food', 'gold', 'happiness', 'homeless', 'hour',
       'housing', 'isNight', 'ownedPlots', 'pop', 'pregnant', 'sick', 'stock', 'totalPlots', 'unemployed']);
   assert.deepEqual([sum.adults, sum.children, sum.elders, sum.pregnant, sum.births, sum.deaths], [8, 0, 0, 0, 0, 0]);
   assert.equal(sum.pop, 8);
@@ -253,12 +253,12 @@ test('berries regrow over time', () => {
   assert.ok(b.amount > 3.9 && b.amount <= NODE_AMOUNT.berry);
 });
 
-test('midnight is processed once per day and events stay capped at 20', () => {
+test('midnight is processed once per day and events stay capped at 300', () => {
   const s = world();
-  for (let i = 0; i < 30; i++) s.events.push({ t: 0, text: 'x' });
+  for (let i = 0; i < 320; i++) s.events.push({ t: 0, text: 'x' });
   tick(s, DAY_LENGTH - 60 + 1);
   assert.equal(s.lastDay, 2);
-  assert.ok(s.events.length <= 20);
+  assert.ok(s.events.length <= 300);
   tick(s, 10);
   assert.equal(s.lastDay, 2);
 });
@@ -306,7 +306,7 @@ test('INTEGRATION: three game days of a small village', () => {
   for (const v of s.villagers) assert.ok(['worker', 'builder', 'idle', 'sleeping'].includes(v.role), String(v.role));
   assert.ok(s.villagers.length >= 8);
   assert.equal(clock(s).day, 4);
-  assert.ok(s.events.length <= 20);
+  assert.ok(s.events.length <= 300);
 
   const copy = deserialize(serialize(s));
   assert.equal(copy.buildings.length, s.buildings.length);
@@ -342,7 +342,7 @@ test('INTEGRATION: thirty game days (seed 5) with fishery, hunter, sheepfarm, he
   put('weaver', SPAWN.x + 20, SPAWN.z - 20);
   put('market', SPAWN.x + 5, SPAWN.z + 35);
 
-  const seen = new Set();   // events are capped at 20, so collect marriages and births as they happen
+  const seen = new Set();   // events are capped, so collect marriages and births as they happen
   const steps = Math.round((DAY_LENGTH * 30) / 0.1);
   assert.doesNotThrow(() => {
     for (let i = 0; i < steps; i++) {
@@ -367,7 +367,7 @@ test('INTEGRATION: thirty game days (seed 5) with fishery, hunter, sheepfarm, he
   }
   assert.ok(s.villagers.length >= 8);
   assert.ok(totalStock(s).fish + totalStock(s).meat + totalStock(s).herbs > 0, 'new professions produced something');
-  assert.ok(s.events.length <= 20 && s.fx.length <= 20);
+  assert.ok(s.events.length <= 300 && s.fx.length <= 20);
   const copy = deserialize(serialize(s));
   assert.doesNotThrow(() => tick(copy, 10));
   assert.ok(Date.now() - t0 < 60000, `took ${Date.now() - t0} ms`);

@@ -3,7 +3,7 @@
 import {
   BUILDINGS, RESOURCES, RESOURCE_INFO, HOUSE_LEVELS, NEED_INFO, CATHEDRAL_STAGES,
   ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS, FISH_RADIUS, HUNT_RADIUS, FOODS, SUPPLY_MAX, TOOL_SPEED_BONUS,
-  SICK_LEAVE_DAYS,
+  SICK_LEAVE_DAYS, DAY_LENGTH,
 } from '../config.js';
 import * as sim from '../sim.js';
 
@@ -168,7 +168,7 @@ export function createHUD(root, handlers = {}) {
     const rec = { items: {}, total: null, g };
     if (g.headTotal) {
       const h = el('span', 'h');
-      h.append(el('span', 'ic', '🍽️'), rec.total = el('span', 'num', '0'));
+      h.append(el('span', 'ic', '🍽️'), rec.total = el('span', 'num', '0'), rec.rate = el('span', 'rate', ''));
       h.title = `อาหารพร้อมกิน: ${g.headTotal.map((r) => info(r).name).join(' + ')}`;
       hd.appendChild(h);
     } else {
@@ -927,7 +927,15 @@ export function createHUD(root, handlers = {}) {
     }
     if (b.type === 'house') return houseHtml(b, state);
     const working = !(def.workers > 0 && (b.workers || []).length === 0);
-    h += working ? '<div class="stat ok">ทำงานปกติ</div>' : '<div class="stat warn">ยังไม่มีคนงาน</div>';
+    if (b.problem) {
+      h += `<div class="problem ${b.problem.blocking ? 'bad' : ''}"><b>⚠️ ${esc(b.problem.text)}</b>`
+        + (b.paused
+          ? '<div class="small">หยุดชั่วคราว — คนงานถูกย้ายไปทำงานอื่น อาคารจะกลับมาทำงานเองเมื่อแก้ปัญหานี้แล้ว</div>'
+          : b.problem.blocking ? '<div class="small">ถ้ายังไม่แก้ภายใน 2 ชั่วโมงในเกม อาคารจะหยุดชั่วคราวและปล่อยคนงานไปทำงานอื่น</div>' : '')
+        + '</div>';
+    } else {
+      h += working ? '<div class="stat ok">ทำงานปกติ</div>' : '<div class="stat warn">ยังไม่มีคนงาน</div>';
+    }
     if (b.tooled) h += `<div class="ok small">🔧 มีเครื่องมือ (+${Math.round(TOOL_SPEED_BONUS * 100)}%)</div>`;
     const sickWorkers = ((state && state.villagers) || []).filter((v) => v.sick && v.jobId === b.id).length;
     if (sickWorkers > 0) h += `<div class="warn small">🤒 คนงานป่วย ${sickWorkers} คน (ออกจากงานชั่วคราว)</div>`;
@@ -1017,17 +1025,97 @@ export function createHUD(root, handlers = {}) {
 
   // ===== events =====
   let eventsSig = '';
+  let evState = null;
+  function eventTime(t) {
+    const day = Math.floor(t / DAY_LENGTH) + 1;
+    const mins = Math.floor(((t % DAY_LENGTH) / DAY_LENGTH) * 24 * 60);
+    return `วัน ${day} · ${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  }
+  // Jump to whatever an event is about: its building (selected) or its place on the map.
+  function openEventTarget(e) {
+    if (e.bId != null && evState?.buildings.some((b) => b.id === e.bId)) call('selectBuilding', e.bId);
+    if (e.vId != null && evState?.villagers.some((v) => v.id === e.vId)) call('selectVillager', e.vId);
+    if (Number.isFinite(e.x) && Number.isFinite(e.z)) call('focusAt', e.x, e.z);
+  }
   function renderEvents(state) {
+    evState = state;
     const evs = (state.events || []).slice(-5).reverse();
     const sig = evs.map((e) => `${e.t}|${e.text}`).join('\n');
     if (sig === eventsSig) return;
     eventsSig = sig;
     eventsEl.textContent = '';
     evs.forEach((e, i) => {
-      const row = el('div', 'ev', e.text);
+      const row = el('div', `ev${e.kind === 'warn' ? ' warn' : ''}${e.bId != null || Number.isFinite(e.x) ? ' link' : ''}`, e.text);
       row.style.opacity = String(Math.max(0.3, 1 - i * 0.18));
+      if (e.detail) row.title = e.detail;
+      row.addEventListener('click', () => openEventTarget(e));
       eventsEl.appendChild(row);
     });
+    const more = el('button', 'ev-more', `📜 ประวัติทั้งหมด (${(state.events || []).length})`);
+    more.type = 'button';
+    more.addEventListener('click', () => openHistory());
+    eventsEl.appendChild(more);
+  }
+
+  // Full, scrollable event history with filters; newest first, grouped by game day.
+  function openHistory() {
+    if (!evState) return;
+    const back = el('div', 'backdrop');
+    const box = el('div', 'modal-box history');
+    const head = el('div', 'hist-head');
+    head.append(el('h2', null, '📜 ประวัติเหตุการณ์'));
+    const close = el('button', 'btn', 'ปิด');
+    close.type = 'button';
+    head.append(close);
+    const filters = el('div', 'hist-filters');
+    const list = el('div', 'hist-list');
+    let filter = 'all';
+    const FILTERS = [['all', 'ทั้งหมด'], ['warn', '⚠️ ปัญหา'], ['family', '👪 ครอบครัว'], ['build', '🔨 ก่อสร้าง']];
+    const matches = (e) => {
+      if (filter === 'all') return true;
+      if (filter === 'warn') return e.kind === 'warn' || /^(⚠️|😞|🤒|🕊️)/u.test(e.text) || /ไม่มีอาหาร|ย้ายออก/.test(e.text);
+      if (filter === 'family') return e.kind === 'family' || /^(💍|👶|🤰|🕊️)/u.test(e.text);
+      if (filter === 'build') return e.kind === 'build' || /ก่อสร้าง|สร้างเสร็จ|อัปเกรด/.test(e.text);
+      return true;
+    };
+    function render() {
+      list.textContent = '';
+      const evs = (evState.events || []).filter(matches).slice().reverse();
+      if (!evs.length) { list.append(el('div', 'dim', 'ยังไม่มีเหตุการณ์ในหมวดนี้')); return; }
+      let day = null;
+      for (const e of evs) {
+        const d = Math.floor(e.t / DAY_LENGTH) + 1;
+        if (d !== day) { day = d; list.append(el('div', 'hist-day', `วันที่ ${d}`)); }
+        const row = el('div', `hist-row${e.kind === 'warn' ? ' warn' : ''}`);
+        row.append(el('span', 'hist-t', eventTime(e.t).split(' · ')[1]), el('span', 'hist-x', e.text));
+        if (e.detail) row.append(el('div', 'hist-d', e.detail));
+        if (e.bId != null || Number.isFinite(e.x)) {
+          row.classList.add('link');
+          row.title = 'คลิกเพื่อไปที่ตำแหน่งนี้';
+          row.addEventListener('click', () => { back.remove(); openEventTarget(e); });
+        }
+        list.append(row);
+      }
+    }
+    for (const [id, label] of FILTERS) {
+      const b = el('button', `tab${id === filter ? ' open' : ''}`, label);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        filter = id;
+        for (const c of filters.children) c.classList.toggle('open', c === b);
+        render();
+      });
+      filters.append(b);
+    }
+    box.append(head, filters, list);
+    back.append(box);
+    const shut = () => { back.remove(); window.removeEventListener('keydown', onKey, true); };
+    const onKey = (e) => { if (e.code === 'Escape') { e.stopPropagation(); shut(); } };
+    window.addEventListener('keydown', onKey, true);
+    close.addEventListener('click', shut);
+    back.addEventListener('click', (e) => { if (e.target === back) shut(); });
+    document.body.append(back);
+    render();
   }
 
   // ===== per-tick update =====
@@ -1065,6 +1153,14 @@ export function createHUD(root, handlers = {}) {
         const tot = g.headTotal.reduce((acc, r) => acc + Math.floor(stock[r] || 0), 0);
         setText(rec.total, String(tot));
         rec.total.parentNode.classList.toggle('low', tot < (summary.pop || 0));
+        const f = summary.food;
+        if (f && rec.rate) {
+          const net = f.net;
+          setText(rec.rate, net === 0 ? '' : `${net > 0 ? '▲' : '▼'}${Math.abs(net)}`);
+          rec.rate.className = `rate ${net < 0 ? 'down' : 'up'}`;
+          const left = f.hoursLeft != null ? ` · จะหมดในอีกประมาณ ${f.hoursLeft < 1 ? 'ไม่ถึง 1' : Math.round(f.hoursLeft)} ชั่วโมงในเกม` : '';
+          rec.total.parentNode.title = `อาหารพร้อมกิน ${tot} · ผลิต ${f.inPerDay}/วัน · ต้องการ ~${f.demandPerDay}/วัน${left}`;
+        }
       }
     }
     setText(nums.gold.num, String(Math.floor(summary.gold || 0)));

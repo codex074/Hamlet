@@ -1054,3 +1054,31 @@ html, body, button { touch-action: manipulation; -webkit-tap-highlight-color: tr
 @media (max-width: 900px), (orientation: portrait) {
   .tc-bar[data-sel="1"] { display: none; }
 }
+
+/* ---------- building problems, food rate, event history ---------- */
+#info .problem { margin: 4px 0 6px; padding: 7px 9px; border-radius: 8px; border: 1px solid rgba(232, 184, 74, 0.55); background: rgba(232, 184, 74, 0.12); color: var(--parch); }
+#info .problem.bad { border-color: rgba(229, 101, 79, 0.65); background: rgba(229, 101, 79, 0.14); }
+#info .problem .small { margin-top: 3px; color: var(--parch-dim); font-size: 12px; line-height: 1.4; }
+.chip .rate { margin-left: 4px; font-size: 11px; font-weight: 700; }
+.chip .rate.up { color: var(--good); }
+.chip .rate.down { color: var(--bad); }
+#events .ev.warn { color: #f0b49a; }
+#events .ev.link { cursor: pointer; }
+@media (hover: hover) { #events .ev.link:hover { text-decoration: underline; } }
+#events .ev-more { display: block; width: 100%; margin-top: 4px; padding: 4px 6px; border-radius: 6px; font-size: 12px; text-align: left;
+  background: rgba(243, 230, 200, 0.06); border: 1px solid rgba(217, 164, 65, 0.25); color: var(--parch-dim); }
+@media (hover: hover) { #events .ev-more:hover { background: rgba(217, 164, 65, 0.18); color: var(--parch); } }
+.modal-box.history { max-width: 640px; height: min(640px, calc(100dvh - 32px)); display: flex; flex-direction: column; }
+.hist-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hist-head h2 { margin: 0; }
+.hist-filters { display: flex; gap: 6px; margin: 10px 0 8px; overflow-x: auto; scrollbar-width: none; }
+.hist-filters .tab { padding: 6px 12px; border-radius: 7px; background: rgba(243, 230, 200, 0.07); border: 1px solid transparent; white-space: nowrap; }
+.hist-filters .tab.open { background: rgba(217, 164, 65, 0.22); border-color: var(--gold-soft); }
+.hist-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-right: 4px; }
+.hist-day { position: sticky; top: 0; z-index: 1; margin: 8px 0 4px; padding: 3px 0; font-weight: 700; color: var(--gold); background: inherit; backdrop-filter: blur(4px); }
+.hist-row { padding: 6px 8px; border-radius: 7px; border-bottom: 1px solid rgba(243, 230, 200, 0.08); }
+.hist-row.link { cursor: pointer; }
+@media (hover: hover) { .hist-row.link:hover { background: rgba(217, 164, 65, 0.12); } }
+.hist-row.warn .hist-x { color: #f0b49a; }
+.hist-t { display: inline-block; min-width: 46px; color: var(--parch-dim); font-variant-numeric: tabular-nums; font-size: 12px; }
+.hist-d { margin: 3px 0 0 46px; font-size: 12px; line-height: 1.45; color: var(--parch-dim); }

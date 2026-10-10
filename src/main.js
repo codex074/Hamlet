@@ -162,6 +162,7 @@ function boot(session) {
     closeInfo: () => tools && tools.deselect(),
     selectVillager: (id) => tools && tools.selectVillager(id),
     selectBuilding: (id) => tools && tools.selectBuilding(id),
+    focusAt: (x, z) => cameraController.target.set(x, terrainHeight(x, z), z),
     saveGame: () => { save(); },
     newGame: () => {
       skipSave = true;

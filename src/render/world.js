@@ -209,6 +209,44 @@ export function createWorldView(scene, terrain) {
 
   const signatureOf = (b) => `${b.type}|${b.built}|${b.level}|${b.stage}|${b.upgrading}`;
 
+  // ------------------------------------------------------------ problem markers
+  // A bobbing badge above workplaces that cannot work: ⚠️ while blocked, ⏸ once paused.
+  function badgeTexture(symbol, ring) {
+    if (typeof document === 'undefined') return null;
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(43, 33, 24, 0.88)';
+    g.beginPath(); g.arc(64, 64, 56, 0, Math.PI * 2); g.fill();
+    g.lineWidth = 8; g.strokeStyle = ring;
+    g.stroke();
+    g.font = '64px "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(symbol, 64, 70);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+  const badgeMats = {
+    blocked: new THREE.SpriteMaterial({ map: badgeTexture('⚠️', '#e8b84a'), depthTest: false, transparent: true }),
+    paused: new THREE.SpriteMaterial({ map: badgeTexture('⏸', '#e5654f'), depthTest: false, transparent: true }),
+  };
+  function syncBadge(g, b, height) {
+    const want = b.problem && b.problem.blocking ? (b.paused ? 'paused' : 'blocked') : null;
+    let sp = g.userData.badge;
+    if (!want) { if (sp) sp.visible = false; return; }
+    if (!sp) {
+      sp = new THREE.Sprite(badgeMats[want]);
+      sp.scale.set(2.6, 2.6, 1);
+      sp.renderOrder = 20;
+      g.add(sp);
+      g.userData.badge = sp;
+    }
+    sp.material = badgeMats[want];
+    sp.visible = true;
+    sp.position.set(0, height + 1.6 + Math.sin(clock * 2.5 + b.id) * 0.25, 0);
+  }
+
   function syncBuildings(state, dt) {
     const alive = new Set();
     for (const b of state.buildings) {
@@ -230,6 +268,10 @@ export function createWorldView(scene, terrain) {
       }
       if (g.userData.sails && b.workers && b.workers.length > 0) {
         g.userData.sails.rotation.z -= dt * (b.type === 'sawmill' ? 6 : 1.1);
+      }
+      if (b.problem || g.userData.badge) {
+        if (g.userData.height == null) g.userData.height = new THREE.Box3().setFromObject(g).max.y - g.position.y;
+        syncBadge(g, b, g.userData.height);
       }
     }
     for (const [id, entry] of buildings) {

@@ -454,6 +454,7 @@ test('hunters ignore deer on unowned land', () => {
   assert.equal(s.animals[0].reserved, null, 'deer outside the territory is not hunted');
   s.animals[0].x = 130;
   s.animals[0].tx = 130;
+  // the lodge was paused while no deer were in reach; it resumes and the hunter goes straight to work
   tick(s, 5);
   assert.ok(s.animals.length === 0 || s.animals[0].reserved != null, 'deer inside is hunted');
   assert.equal(hunter.workers.length, 1);

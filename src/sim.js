@@ -29,6 +29,7 @@ import {
   createStartingVillagers, processDeaths, villagerAt, villagerInfo, household, populationCounts,
 } from './families.js';
 import { canBuild, canWork, canTakeJob } from './taskutil.js';
+import { updateBuildingStatus, effectiveWorkers, foodSummary } from './status.js';
 
 export {
   clock, serviceCovered, upgradeStatus, requestUpgrade, setAutoUpgrade, villagerAt, villagerInfo, household,
@@ -140,8 +141,10 @@ export function summary(state) {
     residents += h.residents.length;
     weighted += h.happiness * h.residents.length;
   }
+  const stock = totalStock(state);
   return {
-    stock: totalStock(state), gold: state.gold, pop: state.villagers.length,
+    stock, gold: state.gold, pop: state.villagers.length,
+    food: foodSummary(state, stock),
     homeless: state.villagers.filter((v) => v.homeId == null).length, housing,
     happiness: residents > 0 ? weighted / residents : 1,
     day: c.day, hour: c.hour, isNight: c.isNight,
@@ -329,7 +332,7 @@ function assignJobs(state) {
   }
   for (const b of jobs) {
     const mine = state.villagers.filter((v) => v.jobId === b.id);
-    while (mine.length > b.desiredWorkers) mine.pop().jobId = null;
+    while (mine.length > effectiveWorkers(b)) mine.pop().jobId = null;
     b.workers = mine.map((v) => v.id);
   }
   // Keep a few able adults free as builders/haulers while there is construction work.
@@ -349,13 +352,15 @@ function assignJobs(state) {
   // Elders are never builders, so they fill light jobs first.
   const elders = state.villagers.filter((v) => v.jobId == null && canWork(v) && !canBuild(v));
   for (const b of jobs) {
-    while (b.workers.length < b.desiredWorkers) {
+    while (b.workers.length < effectiveWorkers(b)) {
       let v = null;
       if (BUILDINGS[b.type].light && elders.length > 0) v = elders.shift();
       else if (free.length > reserve) v = free.shift();
       if (!v) break;
       v.jobId = b.id;
       b.workers.push(v.id);
+      // drop an idle stroll so the new worker starts right away
+      if (v.role === 'idle' && !v.carry) v.queue = [];
     }
   }
 }
@@ -370,6 +375,7 @@ function stepWorld(state, dt) {
   updateConstruction(state);
   if (Math.floor(state.time) !== before) {
     processDeaths(state);
+    updateBuildingStatus(state);
     assignJobs(state);
     for (const b of state.buildings) if (b.type === 'house' && b.built) evaluateHouse(state, b);
     assignHomes(state);

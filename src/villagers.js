@@ -4,6 +4,7 @@ import {
   BUILDINGS, CATHEDRAL_STAGES, FOODS, UPGRADE_BUILD_TIME, DAY_LENGTH, CHILD_PLAY_RADIUS,
   DEATH_AGE_MIN, DEATH_AGE_MAX,
 } from './config.js';
+import { recordFood } from './status.js';
 import { mulberry32, randRange } from './rng.js';
 import { pickGivenName, pickSurname, fullName } from './names.js';
 import {
@@ -320,6 +321,7 @@ function execPut(state, v, t) {
   const b = getBuilding(state, t.bId);
   if (b && isStorage(b)) {
     addStock(b, v.carry.res, v.carry.n);
+    recordFood(state, v.carry.res, v.carry.n);
     v.carry = null;
     return DONE;
   }
@@ -395,6 +397,7 @@ function execEat(state, v, t) {
   const food = pickFood(state, v, b);
   if (food) {
     takeStock(b, food, 1);
+    recordFood(state, food, 1, true);
     v.hunger = 0;
     const home = getBuilding(state, v.homeId);
     if (home?.foodsToday && !home.foodsToday.includes(food)) home.foodsToday.push(food);

@@ -4,6 +4,7 @@ import {
 } from './config.js';
 import { difficultyOf } from './settings.js';
 import { pushEvent } from './events.js';
+import { fullName } from './names.js';
 import { failVillager, removeVillager } from './villagers.js';
 
 // Existing patients get a day worse; those past the limit leave the village.
@@ -14,8 +15,16 @@ export function ageSickness(state) {
     v.sickDays += 1;
     if (v.sickDays >= SICK_LEAVE_DAYS) leaving.push(v.id);
   }
-  for (const id of leaving) removeVillager(state, id);
-  if (leaving.length > 0) pushEvent(state, `ชาวบ้านป่วยหนักย้ายออกไป ${leaving.length} คน`);
+  const hasClinic = state.buildings.some((b) => b.built && b.type === 'infirmary');
+  for (const id of leaving) {
+    const v = state.villagers.find((w) => w.id === id);
+    pushEvent(state, `🤒 ${v ? fullName(v) : 'ชาวบ้าน'} ป่วยหนักจนย้ายออก`, {
+      kind: 'warn', x: v?.x, z: v?.z,
+      detail: `ป่วยติดกัน ${SICK_LEAVE_DAYS} วันโดยไม่ได้รับการรักษา · `
+        + (hasClinic ? 'สถานพยาบาลอาจขาดสมุนไพรหรือหมอ' : 'ยังไม่มีสถานพยาบาล — สร้างสถานพยาบาลและคนเก็บสมุนไพร'),
+    });
+    removeVillager(state, id);
+  }
   return leaving.length;
 }
 

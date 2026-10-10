@@ -311,7 +311,7 @@ test('sick villagers rest at home, walk slowly, and leave after SICK_LEAVE_DAYS 
   processMidnight(s, mulberry32(1));
   assert.ok(!s.villagers.includes(a));
   assert.ok(!h.residents.includes(a.id));
-  assert.ok(s.events.some((e) => e.text.includes('ป่วยหนักย้ายออกไป')));
+  assert.ok(s.events.some((e) => e.text.includes('ป่วยหนักจนย้ายออก') && e.kind === 'warn' && e.detail));
 });
 
 // ---------------------------------------------------------------- market / clothing

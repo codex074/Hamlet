@@ -1,9 +1,12 @@
 // Event log and visual-effect queue shared by the sim modules. Pure: no DOM, no globals.
-const MAX_EVENTS = 20;
+const MAX_EVENTS = 300;   // history the player can scroll back through
 const MAX_FX = 20;
 
-export function pushEvent(state, text) {
-  state.events.push({ t: state.time, text });
+// meta (optional): { kind: 'warn'|'family'|'build'|'info', detail: 'longer explanation', bId, vId, x, z }
+export function pushEvent(state, text, meta = null) {
+  const e = { t: state.time, text };
+  if (meta) Object.assign(e, meta);
+  state.events.push(e);
   while (state.events.length > MAX_EVENTS) state.events.shift();
 }
 
