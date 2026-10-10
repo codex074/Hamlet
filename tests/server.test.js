@@ -224,7 +224,7 @@ test('failed-password limit per account applies across addresses but only counts
   limited.close();
 });
 
-test('parallel wrong passwords cannot exceed the per-account limit; success resets it', async () => {
+test('parallel wrong passwords cannot exceed the per-account limit', async () => {
   const limited = createServer(createApp({ db, rootDir: ROOT, trustProxy: true, authLimit: { max: 3, windowMs: 60_000 } }));
   await new Promise((r) => limited.listen(0, '127.0.0.1', r));
   const port = limited.address().port;
@@ -241,6 +241,22 @@ test('parallel wrong passwords cannot exceed the per-account limit; success rese
   limited.close();
   assert.equal(burst.filter((s) => s === 401).length, 6);   // only 2 × max guesses were actually checked
   assert.equal(burst.filter((s) => s === 429).length, 14);
+});
+
+test('a successful login does not reset failures already counted', async () => {
+  const limited = createServer(createApp({ db, rootDir: ROOT, trustProxy: true, authLimit: { max: 3, windowMs: 60_000 } }));
+  await new Promise((r) => limited.listen(0, '127.0.0.1', r));
+  const port = limited.address().port;
+  const post = (path, body, ip) => fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Real-IP': ip }, body: JSON.stringify(body),
+  }).then((r) => r.status);
+  await post('/api/register', { email: 'noreset@example.com', password: 'right-password' }, '10.7.0.1');
+  for (let i = 0; i < 5; i++) assert.equal(await post('/api/login', { email: 'noreset@example.com', password: 'bad' + i }, `10.6.${i}.1`), 401);
+  assert.equal(await post('/api/login', { email: 'noreset@example.com', password: 'right-password' }, '10.7.0.2'), 200);
+  // budget is 6: five failures + this one = 6 checked; the success did not refill it
+  assert.equal(await post('/api/login', { email: 'noreset@example.com', password: 'bad-x' }, '10.6.9.1'), 401);
+  assert.equal(await post('/api/login', { email: 'noreset@example.com', password: 'bad-y' }, '10.6.9.2'), 429);
+  limited.close();
 });
 
 test('ipKey groups IPv6 /64s regardless of notation', () => {

@@ -34,7 +34,7 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
   const ipLimiter = createLimiter({ ...authLimit, whenFull: 'allow' });
   // Password attempts per EXISTING account (keys are bounded by the number of users, so no table limit).
   // The attempt is recorded before the password check, so parallel requests cannot slip past it; a successful
-  // login clears it. Google sign-in is never affected.
+  // login removes only its own attempt (it never resets an attacker's budget). Google sign-in is never affected.
   const attemptLimiter = createLimiter({ max: authLimit.max * 2, windowMs: authLimit.windowMs, maxKeys: Infinity });
   const tooMany = () => new HttpError(429, 'ลองหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่');
 
@@ -152,7 +152,7 @@ export function createApp({ db, rootDir, googleClientId = null, googleVerify = n
       const attemptKey = `user:${user.id}`;
       if (!attemptLimiter.hit(attemptKey)) throw tooMany();
       if (!(await verifyPassword(password, user.password_hash))) throw new HttpError(401, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
-      attemptLimiter.clear(attemptKey);
+      attemptLimiter.undo(attemptKey);   // a correct password doesn't count, but earlier failures stay counted
       startSession(req, res, user);
       return { user: publicUser(user) };
     }
@@ -310,7 +310,11 @@ function createLimiter({ max, windowMs, maxKeys = 20000, whenFull = 'deny' }) {
       hits.set(key, list);
       return list.length <= max;
     },
-    clear(key) { hits.delete(key); },
+    // Remove the most recent hit (used when an attempt turns out to be legitimate).
+    undo(key) {
+      const list = hits.get(key);
+      if (list && list.length) list.pop();
+    },
   };
 }
 
