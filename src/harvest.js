@@ -1,6 +1,7 @@
 // Harvest orders: the player paints over trees, rocks and ore veins to mark them; villagers without a job
 // (and builders with nothing to build) walk to the nearest marked node, gather it and carry the goods to
-// the nearest storage. This replaces the woodcutter, quarry and iron mine buildings. Pure: no DOM, no globals.
+// the nearest storage. This replaces the woodcutter and iron mine buildings; surface rocks are finite, after
+// that stone comes from the quarry (jobs.js). Pure: no DOM, no globals.
 import { BUILDINGS, ZONE_BRUSH } from './config.js';
 import { distance, nearestStorage } from './economy.js';
 import { nodesWithin } from './nodeindex.js';
@@ -10,7 +11,7 @@ import { gotoPoint, gotoBuilding } from './taskutil.js';
 // What each kind of node yields per trip and how long one trip's work takes (from the retired buildings).
 export const HARVEST = {
   tree: { res: 'wood', n: BUILDINGS.woodcutter.output.wood, time: BUILDINGS.woodcutter.time, name: 'ต้นไม้' },
-  rock: { res: 'stone', n: BUILDINGS.quarry.output.stone, time: BUILDINGS.quarry.time, name: 'ก้อนหิน' },
+  rock: { res: 'stone', n: 3, time: 8, name: 'ก้อนหิน' },
   ore: { res: 'ore', n: BUILDINGS.ironmine.output.ore, time: BUILDINGS.ironmine.time, name: 'สายแร่' },
 };
 export const HARVEST_BRUSHES = ['harvest', 'unharvest'];

@@ -8,9 +8,9 @@ import {
 
 const R = ZONE_BRUSH.default;
 
-test('woodcutter, quarry and iron mine are retired: not buildable any more', () => {
+test('woodcutter and iron mine are retired: not buildable any more', () => {
   const s = world();
-  for (const t of ['woodcutter', 'quarry', 'ironmine']) {
+  for (const t of ['woodcutter', 'ironmine']) {
     assert.equal(isUnlocked(s, t), false);
     const res = canPlace(s, t, SPAWN.x + 30, SPAWN.z + 10, 0);
     assert.equal(res.ok, false);

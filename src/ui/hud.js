@@ -4,7 +4,7 @@ import {
   BUILDINGS, RESOURCES, RESOURCE_INFO, HOUSE_LEVELS, NEED_INFO, CATHEDRAL_STAGES,
   ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS, FISH_RADIUS, HUNT_RADIUS, FOODS, SUPPLY_MAX, TOOL_SPEED_BONUS,
   SICK_LEAVE_DAYS, DAY_LENGTH, WATER_RADIUS, THIRSTY_AT, HUNGRY_AT, MARKET_SLOTS, MARKET_TREASURY_SHARE,
-  SEASON_DAYS, RAIN_THIRST_MUL, SNOW_SPEED_MUL,
+  SEASON_DAYS, RAIN_THIRST_MUL, SNOW_SPEED_MUL, QUARRY_ACCIDENT_CHANCE, QUARRY_TOOLED_MUL,
 } from '../config.js';
 import * as sim from '../sim.js';
 import { createWorkforceUI } from './workforce.js';
@@ -25,7 +25,7 @@ const BUILDING_DESC = {
   storehouse: 'เก็บทรัพยากรของหมู่บ้าน ชาวบ้านนำของมาเก็บและหยิบไปใช้ที่นี่',
   woodcutter: `ตัดต้นไม้ในรัศมี ${GATHER_RADIUS} ม. แล้วส่งไม้ซุงเข้าโกดัง`,
   forager: `เก็บเบอร์รี่จากพุ่มไม้ในรัศมี ${GATHER_RADIUS} ม. เป็นอาหารเริ่มต้น`,
-  quarry: `ขุดหินจากก้อนหินในรัศมี ${GATHER_RADIUS} ม.`,
+  quarry: 'ขุดหินจากบ่อได้ไม่จำกัด (ก้อนหินบนพื้นมีจำกัด เมื่อหมดต้องพึ่งเหมือง) ใส่คนงานได้ถึง 10 คน ⚠️ งานเสี่ยง — อาจบาดเจ็บหรือเสียชีวิต เครื่องมือจากโรงตีเหล็กลดความเสี่ยงครึ่งหนึ่งและขุดเร็วขึ้น',
   sawmill: 'แปรรูปไม้ซุงเป็นไม้แปรรูปสำหรับสร้างและอัปเกรดบ้าน',
   farmhouse: `ปลูกข้าวสาลีในโซนไร่นารัศมี ${FIELD_RADIUS} ม. ดินยิ่งอุดมยิ่งได้ผลผลิตมาก`,
   mill: 'บดข้าวสาลีเป็นแป้ง',
@@ -120,6 +120,7 @@ function jobLine(type) {
   else if (d.job === 'fish') parts.push(`ตกปลา (ติดน้ำ, รัศมี ${FISH_RADIUS} ม.) → ${resNames(d.output)}`);
   else if (d.job === 'hunt') parts.push(`ล่ากวาง (รัศมี ${HUNT_RADIUS} ม.) → ${resNames(d.output)}`);
   else if (d.job === 'ranch') parts.push(`เลี้ยงแกะ → ${(d.outputs || []).map(resNames).join(' / ')}`);
+  else if (d.job === 'quarry') parts.push(`ขุดหินไม่จำกัด → ${resNames(d.output)} · ⚠️ เสี่ยงอุบัติเหตุ`);
   else if (d.job === 'market') parts.push(`ขายอาหาร/ผ้าได้ 4 รายการ · ชาวบ้านซื้อด้วยเงินค่าจ้าง · มีบ่อน้ำ`);
   else if (d.job === 'doctor') {
     parts.push(`บริการ${SERVICE_NAME[d.service] || ''} รัศมี ${d.serviceRadius} ม. · ใช้${info(d.supply).name}`);
@@ -1066,6 +1067,12 @@ export function createHUD(root, handlers = {}) {
       h += working ? '<div class="stat ok">ทำงานปกติ</div>' : '<div class="stat warn">ยังไม่มีคนงาน</div>';
     }
     if (b.tooled) h += `<div class="ok small">🔧 มีเครื่องมือ (+${Math.round(TOOL_SPEED_BONUS * 100)}%)</div>`;
+    if (def.job === 'quarry') {
+      const risk = QUARRY_ACCIDENT_CHANCE * (b.tooled ? QUARRY_TOOLED_MUL : 1) * 100;
+      const acc = b.accidents || { injured: 0, killed: 0 };
+      h += `<div class="${b.tooled ? 'dim' : 'warn'} small">⚠️ โอกาสเกิดอุบัติเหตุ ${risk.toFixed(1)}% ต่อการขุดหนึ่งครั้ง${b.tooled ? ' (ลดลงครึ่งหนึ่งด้วยเครื่องมือ)' : ' — ส่งเครื่องมือจากโรงตีเหล็กเพื่อลดลงครึ่งหนึ่ง'}</div>`;
+      if (acc.injured || acc.killed) h += `<div class="small">🤕 บาดเจ็บ ${acc.injured} ครั้ง · ⚰️ เสียชีวิต ${acc.killed} คน</div>`;
+    }
     const sickWorkers = ((state && state.villagers) || []).filter((v) => v.sick && v.jobId === b.id).length;
     if (sickWorkers > 0) h += `<div class="warn small">🤒 คนงานป่วย ${sickWorkers} คน (หยุดงานจนกว่าจะหาย)</div>`;
     if (def.job === 'market') h += marketHtml(b, def, state);

@@ -17,7 +17,7 @@ import {
   emptyStock, distance, nearestStorage, addStock, totalStock, isStorage,
 } from './economy.js';
 import { canPlace as placementCanPlace, canPaintZone as placementCanPaintZone } from './placement.js';
-import { stepVillager, failVillager, getBuilding, isSite } from './villagers.js';
+import { stepVillager, failVillager, getBuilding, isSite, removeVillager } from './villagers.js';
 import {
   clock, serviceCovered, pushEvent, newBuilding, clearNodesUnder, processMidnight, assignHomes, planHouses,
   evaluateHouse,
@@ -353,6 +353,7 @@ function stepWorld(state, dt) {
   const before = Math.floor(state.time);
   state.time += dt;
   for (const v of state.villagers) stepVillager(state, v, dt, rand);
+  for (const v of state.villagers.filter((x) => x.dead)) removeVillager(state, v.id);   // quarry accidents
   stepAnimals(state, dt, rand);
   updateConstruction(state);
   if (Math.floor(state.time) !== before) {

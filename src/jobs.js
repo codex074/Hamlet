@@ -1,9 +1,13 @@
-// Planners and task executors for the newer professions: fishing, ranching, hunting, doctor, market.
+// Planners and task executors for the newer professions: fishing, ranching, hunting, doctor, market, quarry.
 // Pure: no DOM, no globals. Wired into villagers.js via JOB_PLANNERS / JOB_EXEC.
 import {
   CARRY_MAX, CELL, EDGE_MARGIN, FISH_RADIUS, HUNT_RADIUS, HUNT_SHOT_DIST, SUPPLY_MAX, HERBS_PER_HEAL,
   HEAL_TIME, BUILDINGS, FORESTER_RADIUS, SAPLING_GAP, SAPLING_PATH_WEAR, MAX_SAPLINGS_PER_FORESTER,
+  QUARRY_ACCIDENT_CHANCE, QUARRY_FATAL_SHARE, QUARRY_TOOLED_MUL,
 } from './config.js';
+import { mulberry32 } from './rng.js';
+import { pushEvent } from './events.js';
+import { fullName } from './names.js';
 import { distance, nearestStorage, nearestStorageWith } from './economy.js';
 import { isWater } from './terrain.js';
 import { sizeOf } from './world.js';
@@ -224,9 +228,63 @@ function planForester(state, v, b, cfg, rand) {
   planWait(v, null);
 }
 
+// ---------- quarry ----------
+
+// Diggers work in the pit and carry the stone to the nearest storage. The pit never runs out.
+function planQuarry(state, v, b, cfg) {
+  const store = nearestStorage(state, b.x, b.z);
+  if (!store) return planWait(v, null);
+  const ang = (v.id * 2.399) % (Math.PI * 2);   // spread the diggers around the pit
+  const r = BUILDINGS[b.type].radius * 0.55;
+  v.queue.push(
+    gotoPoint(b.x + Math.cos(ang) * r, b.z + Math.sin(ang) * r),
+    { kind: 'dig', bId: b.id, t: workTime(b, cfg.time), out: { ...cfg.output } },
+    gotoBuilding(store, b.x, b.z),
+    { kind: 'put', bId: store.id },
+  );
+}
+
+// One dig's accident roll, from (seed, villager, time) so it is reproducible: null | 'injured' | 'killed'.
+// Tools from the blacksmith halve the risk (and, via workTime, make each dig faster).
+export function rollAccident(state, v, b) {
+  const r = mulberry32(((state.seed * 2246822519) ^ Math.imul(v.id, 3266489917) ^ Math.floor(state.time * 10)) >>> 0);
+  const chance = QUARRY_ACCIDENT_CHANCE * (b.tooled ? QUARRY_TOOLED_MUL : 1);
+  if (r() >= chance) return null;
+  return r() < QUARRY_FATAL_SHARE ? 'killed' : 'injured';
+}
+
+function execDig(state, v, t, dt) {
+  const b = getBuilding(state, t.bId);
+  if (!b || !b.built) return FAIL;
+  if (countdown(t, dt) !== DONE) return undefined;
+  const accident = rollAccident(state, v, b);
+  b.accidents ??= { injured: 0, killed: 0 };
+  const who = fullName(v);
+  const at = { bId: b.id, x: b.x, z: b.z };
+  if (accident === 'killed') {
+    b.accidents.killed += 1;
+    state.deaths = (state.deaths ?? 0) + 1;
+    pushEvent(state, `⛏️ ${who} เสียชีวิตจากอุบัติเหตุในเหมืองหิน`, {
+      kind: 'warn', ...at, detail: 'งานเหมืองหินเสี่ยงอันตราย — เครื่องมือจากโรงตีเหล็กลดความเสี่ยงลงครึ่งหนึ่งและขุดเร็วขึ้น หรือลดจำนวนคนงาน',
+    });
+    v.dead = true;   // removed by the sim once every villager has moved this tick
+    return FAIL;
+  }
+  if (accident === 'injured') {
+    b.accidents.injured += 1;
+    v.sick = true;
+    v.sickDays = 0;
+    v.healer = null;
+    pushEvent(state, `🤕 ${who} บาดเจ็บจากหินถล่มในเหมือง ต้องพักรักษาตัว`, { kind: 'warn', ...at, vId: v.id });
+    return FAIL;   // drops the work; planNext sends them to rest
+  }
+  v.carry = firstEntry(t.out);
+  return DONE;
+}
+
 export const JOB_PLANNERS = {
   fish: planFish, ranch: planRanch, hunt: planHunt, doctor: planDoctor, market: planMarket,
-  forester: planForester,
+  forester: planForester, quarry: planQuarry,
 };
 
 // ---------- executors ----------
@@ -283,5 +341,5 @@ function execPlant(state, v, t, dt) {
 }
 
 export const JOB_EXEC = {
-  follow: execFollow, hunt: execHunt, heal: execHeal, supply: execSupply, plant: execPlant,
+  follow: execFollow, hunt: execHunt, heal: execHeal, supply: execSupply, plant: execPlant, dig: execDig,
 };

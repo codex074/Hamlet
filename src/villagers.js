@@ -499,7 +499,7 @@ const EXEC = {
 };
 
 // Finishing one of these earns the villager a wage (coins they spend at markets).
-const PAID_TASKS = new Set(['gather', 'produce', 'hunt', 'plant', 'heal', 'staff', 'build', 'deliver', 'supply']);
+const PAID_TASKS = new Set(['gather', 'produce', 'hunt', 'plant', 'heal', 'staff', 'build', 'deliver', 'supply', 'dig']);
 
 export function stepVillager(state, v, dt, rand) {
   const diff = difficultyOf(state).hunger;

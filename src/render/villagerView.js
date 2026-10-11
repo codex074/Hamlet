@@ -9,7 +9,7 @@ import {
 const SCALE = 1.2;               // characters are life-size; scale up a touch for readability
 const START_CAP = 16;
 const PARTS = ['torso', 'head', 'armL', 'armR', 'legL', 'legR', 'item'];
-const WORK_TASKS = new Set(['gather', 'produce', 'build', 'staff', 'hunt', 'heal']);
+const WORK_TASKS = new Set(['gather', 'produce', 'build', 'staff', 'hunt', 'heal', 'dig']);
 const SICK_TINT = new THREE.Color(0.78, 0.95, 0.72);   // pale, slightly green face
 const WHITE = new THREE.Color(1, 1, 1);
 const STRIDE = 4.6;              // walk-cycle radians per metre

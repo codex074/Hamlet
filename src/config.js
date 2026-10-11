@@ -66,7 +66,7 @@ export const BUILDINGS = {
   forager:    { name: 'คนเก็บของป่า', category: 'resource', radius: 3.5, cost: { wood: 8 }, buildTime: 15,
                 workers: 4, job: 'gather', node: 'berry', output: { berries: 2 }, time: 6, unlockPop: 0, light: true },
   quarry:     { name: 'เหมืองหิน', category: 'resource', radius: 4, cost: { wood: 12 }, buildTime: 20,
-                workers: 2, job: 'gather', node: 'rock', output: { stone: 3 }, time: 8, unlockPop: 0, retired: true },
+                workers: 10, job: 'quarry', output: { stone: 3 }, time: 9, unlockPop: 0 },
   sawmill:    { name: 'โรงเลื่อย', category: 'production', radius: 4.5, cost: { wood: 15, stone: 6 }, buildTime: 30,
                 workers: 2, job: 'process', input: { wood: 2 }, output: { planks: 1 }, time: 6, unlockPop: 8 },
   farmhouse:  { name: 'ฟาร์ม', category: 'production', radius: 4.5, cost: { wood: 12, planks: 4 }, buildTime: 30,
@@ -80,7 +80,7 @@ export const BUILDINGS = {
   tavern:     { name: 'โรงเตี๊ยม', category: 'service', radius: 5, cost: { planks: 15, stone: 8 }, buildTime: 40,
                 workers: 1, job: 'service', service: 'entertainment', serviceRadius: 45, unlockPop: 20, light: true },
   fishery:    { name: 'ท่าประมง', category: 'resource', radius: 4, cost: { wood: 10 }, buildTime: 20,
-                workers: 2, job: 'fish', output: { fish: 3 }, time: 10, unlockPop: 10, nearWater: true },
+                workers: 4, job: 'fish', output: { fish: 3 }, time: 10, unlockPop: 10, nearWater: true },
   hunter:     { name: 'กระท่อมนักล่า', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
                 workers: 1, job: 'hunt', output: { meat: 4 }, time: 4, unlockPop: 8 },
   herbalist:  { name: 'คนเก็บสมุนไพร', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
@@ -192,6 +192,10 @@ export const SICK_LEAVE_DAYS = 3;           // untreated sick villagers leave af
 export const SICK_SPEED_MUL = 0.6;
 export const HEAL_TIME = 6;                 // seconds a doctor spends treating
 // Services that hold a supply (infirmary: herbs, market: cloth)
+// Quarry: digs stone without end (surface rocks run out); every dig risks an accident.
+export const QUARRY_ACCIDENT_CHANCE = 0.006;   // per finished dig
+export const QUARRY_FATAL_SHARE = 0.35;        // of accidents; the rest leave the worker injured (sick)
+export const QUARRY_TOOLED_MUL = 0.5;          // tools at the quarry halve the risk
 export const SUPPLY_MAX = 10;               // stock a service building keeps on hand
 // Market: merchants carry the goods the player picked (up to MARKET_SLOTS) from storage to the stalls;
 // hungry villagers buy a meal there with the coins they earn by working, instead of walking to storage.
