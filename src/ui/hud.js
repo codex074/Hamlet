@@ -4,7 +4,7 @@ import {
   BUILDINGS, RESOURCES, RESOURCE_INFO, HOUSE_LEVELS, NEED_INFO, CATHEDRAL_STAGES,
   ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS, FISH_RADIUS, HUNT_RADIUS, FOODS, SUPPLY_MAX, TOOL_SPEED_BONUS,
   SICK_LEAVE_DAYS, DAY_LENGTH, WATER_RADIUS, THIRSTY_AT, HUNGRY_AT, MARKET_SLOTS, MARKET_TREASURY_SHARE,
-  SEASON_DAYS, RAIN_THIRST_MUL, SNOW_SPEED_MUL, QUARRY_ACCIDENT_CHANCE, QUARRY_TOOLED_MUL,
+  SEASON_DAYS, RAIN_THIRST_MUL, SNOW_SPEED_MUL, QUARRY_ACCIDENT_CHANCE, QUARRY_TOOLED_MUL, CROPS,
 } from '../config.js';
 import * as sim from '../sim.js';
 import { createWorkforceUI } from './workforce.js';
@@ -27,7 +27,7 @@ const BUILDING_DESC = {
   forager: `เก็บเบอร์รี่จากพุ่มไม้ในรัศมี ${GATHER_RADIUS} ม. เป็นอาหารเริ่มต้น`,
   quarry: 'ขุดหินจากบ่อได้ไม่จำกัด (ก้อนหินบนพื้นมีจำกัด เมื่อหมดต้องพึ่งเหมือง) ใส่คนงานได้ถึง 10 คน ⚠️ งานเสี่ยง — อาจบาดเจ็บหรือเสียชีวิต เครื่องมือจากโรงตีเหล็กลดความเสี่ยงครึ่งหนึ่งและขุดเร็วขึ้น',
   sawmill: 'แปรรูปไม้ซุงเป็นไม้แปรรูปสำหรับสร้างและอัปเกรดบ้าน',
-  farmhouse: `ปลูกข้าวสาลีในโซนไร่นารัศมี ${FIELD_RADIUS} ม. ดินยิ่งอุดมยิ่งได้ผลผลิตมาก`,
+  farmhouse: `ปลูกพืชในโซนไร่นารัศมี ${FIELD_RADIUS} ม. — เลือกได้ว่าจะปลูกข้าวสาลี ข้าวโพด หรือถั่ว (ปลดล็อกทีละชนิดตามจำนวนประชากร) ดินยิ่งอุดมยิ่งได้ผลผลิตมาก`,
   mill: 'บดข้าวสาลีเป็นแป้ง',
   bakery: 'อบแป้งเป็นขนมปัง อาหารที่ชนชั้นสูงขึ้นต้องการ',
   chapel: 'ให้บริการด้านศาสนาแก่บ้านที่อยู่ในรัศมี ต้องมีคนประจำ',
@@ -51,7 +51,7 @@ const SERVICE_NAME = { religion: 'ศาสนา', entertainment: 'ความ
 // Top-bar resource groups (every RESOURCES entry appears in exactly one popover).
 const RES_GROUPS = [
   { id: 'mat', label: 'วัสดุ', items: ['wood', 'planks', 'stone', 'ore', 'tools'], head: ['wood', 'planks', 'stone'] },
-  { id: 'food', label: 'อาหาร', items: ['berries', 'bread', 'fish', 'meat', 'wheat', 'flour'], headTotal: FOODS },
+  { id: 'food', label: 'อาหาร', items: ['berries', 'bread', 'fish', 'meat', 'corn', 'beans', 'wheat', 'flour'], headTotal: FOODS },
   { id: 'goods', label: 'สินค้า', items: ['wool', 'cloth', 'herbs'], head: ['cloth', 'herbs'] },
 ];
 
@@ -114,7 +114,7 @@ function jobLine(type) {
   const parts = [];
   if (d.workers) parts.push(`คนงาน ${d.workers}`);
   if (d.job === 'gather') parts.push(`${NODE_NAME[d.node] || d.node}${d.keepNode ? ' (ไม่ทำให้หมด)' : ''} → ${resNames(d.output)}`);
-  else if (d.job === 'farm') parts.push(`ไร่นา → ${resNames(d.output)}`);
+  else if (d.job === 'farm') parts.push(`ไร่นา → ${Object.values(CROPS).map((c) => `${c.icon} ${c.name}`).join(' / ')}`);
   else if (d.job === 'process') parts.push(`${resNames(d.input)} → ${resNames(d.output)}`);
   else if (d.job === 'service') parts.push(`บริการ${SERVICE_NAME[d.service] || ''} รัศมี ${d.serviceRadius} ม.`);
   else if (d.job === 'fish') parts.push(`ตกปลา (ติดน้ำ, รัศมี ${FISH_RADIUS} ม.) → ${resNames(d.output)}`);
@@ -1005,6 +1005,21 @@ export function createHUD(root, handlers = {}) {
     return h;
   }
 
+  // Farm: which crop it grows (locked crops show the population that unlocks them).
+  function farmHtml(b, state) {
+    const cur = b.crop && CROPS[b.crop] ? b.crop : 'wheat';
+    let h = `<div class="sub">กำลังปลูก: <b>${CROPS[cur].icon} ${CROPS[cur].name}</b></div><div class="mkt crops">`;
+    for (const [k, c] of Object.entries(CROPS)) {
+      const open = typeof sim.cropUnlocked === 'function' ? sim.cropUnlocked(state, k) : k === 'wheat';
+      const on = k === cur;
+      const tip = open ? c.use : `ปลดล็อกเมื่อประชากร ${c.unlockPop} คน`;
+      h += `<button type="button" class="mk${on ? ' on' : ''}" data-act="crop" data-crop="${k}" ${open ? '' : 'disabled'} title="${esc(tip)}">`
+        + `<span class="mk-ic">${c.icon}</span><span class="mk-nm">${c.name}</span><span class="mk-st"></span>`
+        + `<span class="mk-pr">${open ? esc(c.use) : `🔒 ประชากร ${c.unlockPop}`}</span></button>`;
+    }
+    return `${h}</div><div class="dim small">เปลี่ยนพืชได้ทุกเมื่อ แปลงที่เก็บเกี่ยวไปจะปลูกพืชใหม่</div>`;
+  }
+
   // Market: pick up to MARKET_SLOTS goods (toggle chips), stall stock, prices and sales.
   function marketHtml(b, def, state) {
     const sell = Array.isArray(b.sell) ? b.sell : (sim.DEFAULT_MARKET_GOODS || []);
@@ -1075,6 +1090,7 @@ export function createHUD(root, handlers = {}) {
     }
     const sickWorkers = ((state && state.villagers) || []).filter((v) => v.sick && v.jobId === b.id).length;
     if (sickWorkers > 0) h += `<div class="warn small">🤒 คนงานป่วย ${sickWorkers} คน (หยุดงานจนกว่าจะหาย)</div>`;
+    if (def.job === 'farm') h += farmHtml(b, state);
     if (def.job === 'market') h += marketHtml(b, def, state);
     else if (def.supply) h += supplyHtml(b, def, state);
     else if (def.storage || b.stock) h += stockHtml(b);
@@ -1094,7 +1110,10 @@ export function createHUD(root, handlers = {}) {
     if (btn.dataset.act === 'workforce') { openWorkforce(); return; }
     const b = findBuilding(lastState, infoId);
     if (!b) return;
-    if (btn.dataset.act === 'sell') {
+    if (btn.dataset.act === 'crop') {
+      const res = call('setFarmCrop', b.id, btn.dataset.crop);
+      if (res && !res.ok) toast(res.reason);
+    } else if (btn.dataset.act === 'sell') {
       const cur = Array.isArray(b.sell) ? b.sell.slice() : (sim.DEFAULT_MARKET_GOODS || []).slice();
       const r = btn.dataset.res;
       const next = cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r];

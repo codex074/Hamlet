@@ -33,9 +33,18 @@ export const FIELD_RADIUS = 30;
 export const SERVICE_STAFFED_DIST = 6;
 export const IDLE_WANDER_RADIUS = 10;
 
-export const RESOURCES = ['wood', 'planks', 'stone', 'berries', 'wheat', 'flour', 'bread',
+export const RESOURCES = ['wood', 'planks', 'stone', 'berries', 'wheat', 'corn', 'beans', 'flour', 'bread',
   'fish', 'meat', 'wool', 'cloth', 'herbs', 'ore', 'tools'];
-export const FOODS = ['bread', 'meat', 'fish', 'berries'];   // preference order when eating (rotates for variety)
+export const FOODS = ['bread', 'meat', 'fish', 'corn', 'beans', 'berries'];   // preference order when eating (rotates for variety)
+
+// What a farm can grow; each crop unlocks at a population. Wheat goes to the mill (bread); corn and beans
+// are eaten straight from storage. `n` = harvest per trip before soil fertility and season.
+export const CROPS = {
+  wheat: { name: 'ข้าวสาลี', icon: '🌾', unlockPop: 12, n: 3, use: 'บดเป็นแป้งที่โรงสี แล้วอบเป็นขนมปัง' },
+  corn: { name: 'ข้าวโพด', icon: '🌽', unlockPop: 18, n: 3, use: 'กินได้ทันที ไม่ต้องแปรรูป' },
+  beans: { name: 'ถั่ว', icon: '🫘', unlockPop: 24, n: 3, use: 'กินได้ทันที เพิ่มความหลากหลายของอาหาร' },
+};
+export const HARVEST_MARKS = 12;     // recent harvest spots a farm remembers (crops there regrow on screen)
 
 export const RESOURCE_INFO = {
   wood:    { name: 'ไม้ซุง',     icon: '🪵' },
@@ -43,6 +52,8 @@ export const RESOURCE_INFO = {
   stone:   { name: 'หิน',        icon: '🪨' },
   berries: { name: 'เบอร์รี่',    icon: '🫐' },
   wheat:   { name: 'ข้าวสาลี',   icon: '🌾' },
+  corn:    { name: 'ข้าวโพด',    icon: '🌽' },
+  beans:   { name: 'ถั่ว',        icon: '🫘' },
   flour:   { name: 'แป้ง',       icon: '🥣' },
   bread:   { name: 'ขนมปัง',     icon: '🍞' },
   fish:    { name: 'ปลา',        icon: '🐟' },
@@ -202,7 +213,7 @@ export const SUPPLY_MAX = 10;               // stock a service building keeps on
 export const MARKET_SLOTS = 4;
 export const MARKET_STOCK_MAX = 12;         // per food on the stalls (cloth keeps SUPPLY_MAX)
 export const MARKET_RESTOCK_AT = 0.5;       // merchants refill a good below this share of its max
-export const MARKET_PRICE = { berries: 1, fish: 2, meat: 2, bread: 3 };   // coins per meal
+export const MARKET_PRICE = { berries: 1, fish: 2, meat: 2, bread: 3, corn: 2, beans: 2 };   // coins per meal
 export const MARKET_TREASURY_SHARE = 0.5;   // share of every sale paid into the village treasury (gold)
 export const WAGE_PER_TASK = 1;             // coins a villager earns for each finished piece of work
 export const CLOTH_PER_HOUSE_PER_DAY = 0.5; // consumed from the covering market at midnight

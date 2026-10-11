@@ -8,6 +8,7 @@ import { distance, storages, nearestStorageWithAll } from './economy.js';
 import { isOwned } from './territory.js';
 import { pushEvent } from './events.js';
 import { seasonEffects } from './seasons.js';
+import { farmsGrowing } from './farming.js';
 
 const HOUR = DAY_LENGTH / 24;
 const WALKING_SHARE = 1.1;
@@ -39,7 +40,9 @@ export function buildingProblem(state, b) {
     case 'process': {
       if (!nearestStorageWithAll(state, b.x, b.z, cfg.input) && !busyProducing(state, b)) {
         const need = Object.keys(cfg.input).map(resName).join(', ');
-        return { code: 'no-input', text: `ขาดวัตถุดิบ: ${need}`, blocking: true };
+        // e.g. every farm switched to corn: say why no wheat is coming
+        const noFarm = cfg.input.wheat && farmsGrowing(state, 'wheat').length === 0 ? ' — ไม่มีฟาร์มที่ปลูกข้าวสาลี' : '';
+        return { code: 'no-input', text: `ขาดวัตถุดิบ: ${need}${noFarm}`, blocking: true };
       }
       break;
     }

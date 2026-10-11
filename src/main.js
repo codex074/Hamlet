@@ -160,6 +160,7 @@ function boot(session) {
     setSpeed,
     assignJob: (vId, key) => sim.assignJob(state, vId, key),
     setMarketGoods: (id, list) => sim.setMarketGoods(state, id, list),
+    setFarmCrop: (id, crop) => sim.setFarmCrop(state, id, crop),
     requestUpgrade: (id) => (typeof sim.requestUpgrade === 'function' ? sim.requestUpgrade(state, id) : { ok: false, reason: 'ยังอัปเกรดไม่ได้' }),
     setAutoUpgrade: (id, on) => { if (typeof sim.setAutoUpgrade === 'function') sim.setAutoUpgrade(state, id, on); },
     closeInfo: () => tools && tools.deselect(),

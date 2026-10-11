@@ -366,6 +366,22 @@ const CARRY_BUILDERS = {
     add(l, sph(0.1, 7, 5), 0xe8c86a, 0, 0.3, 0.15, 0.5, 0, 0, 1, 1.4, 1);
     return merge(l);
   },
+  corn: () => {
+    const l = [];
+    for (let i = 0; i < 3; i++) {
+      add(l, cyl(0.045, 0.035, 0.26, 6), 0xe8c23a, (i - 1) * 0.09, 0.02 * (i % 2), 0, 0, 0, Math.PI / 2 + (i - 1) * 0.15);
+      add(l, cyl(0.05, 0.02, 0.1, 5), 0x9ab25a, (i - 1) * 0.09 - 0.15, 0.02 * (i % 2), 0, 0, 0, Math.PI / 2);   // husk
+    }
+    return merge(l);
+  },
+  beans: () => {
+    const l = [];
+    add(l, sph(0.16, 8, 6), 0xa08a5a, 0, 0, 0, 0, 0, 0, 1.15, 0.95, 0.9);   // sack
+    add(l, cyl(0.05, 0.07, 0.07, 6), 0xa08a5a, 0, 0.16, 0);
+    add(l, torus(0.05, 0.012, 6), 0x6b4a2c, 0, 0.15, 0, Math.PI / 2);
+    for (let i = 0; i < 4; i++) add(l, sph(0.03, 5, 4), 0x6b4226, (i - 1.5) * 0.04, 0.2, 0.01 * i);   // beans on top
+    return merge(l);
+  },
   flour: () => {
     const l = [];
     add(l, sph(0.17, 8, 6), 0xe8e0cc, 0, 0, 0, 0, 0, 0, 1.2, 1, 0.9);

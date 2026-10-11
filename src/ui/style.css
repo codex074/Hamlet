@@ -1216,3 +1216,7 @@ body.photo-mode .fps-counter, body.photo-mode #touchbar { display: none !importa
 @media (max-width: 700px) { #tutorial { width: min(280px, calc(100vw - 16px)); font-size: 12px; } }
 body.info-open #tutorial { z-index: 11; }
 body.photo-mode #tutorial { display: none !important; }
+
+/* farm crop picker: one wide button per crop */
+#info .mkt.crops { grid-template-columns: 1fr; }
+#info .mkt.crops .mk-pr { white-space: normal; }

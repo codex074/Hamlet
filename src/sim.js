@@ -31,6 +31,7 @@ import {
 import { updateBuildingStatus, foodSummary } from './status.js';
 import { seasonOf, weatherAt, seasonEffects, updateSnow, seasonChangeText } from './seasons.js';
 import { HARVEST_BRUSHES, canMark, markResources, harvestSummary } from './harvest.js';
+import { updateCrops, setFarmCrop, cropOf, cropUnlocked, CROP_KEYS } from './farming.js';
 import {
   startTutorial, updateTutorial, tutorialView, skipTutorial, resumeTutorial, TUTORIAL_STEPS,
 } from './tutorial.js';
@@ -46,7 +47,7 @@ export {
   clock, serviceCovered, upgradeStatus, requestUpgrade, setAutoUpgrade, villagerAt, villagerInfo, household,
   normalizeSettings, DEFAULT_SETTINGS, SETTINGS_OPTIONS, spawnOf, plotInfo, plotPrice, buyPlot, isOwned,
   assignJob, jobChoices, jobCandidates, workforceSummary, workplaceName, waitingReason, jobTitleOf,
-  seasonOf, weatherAt, seasonEffects, tutorialView, skipTutorial, resumeTutorial, TUTORIAL_STEPS,
+  seasonOf, weatherAt, seasonEffects, setFarmCrop, cropOf, cropUnlocked, CROP_KEYS, tutorialView, skipTutorial, resumeTutorial, TUTORIAL_STEPS,
   BUILDER, JOB_TITLE, BUILDER_TITLE, ensureMarket, setMarketGoods, MARKET_GOODS, DEFAULT_MARKET_GOODS, priceOf,
   stockMaxOf,
 };
@@ -96,6 +97,7 @@ export function createWorld(seed, settings = DEFAULT_SETTINGS) {
   state.manualJobs = true;
   state.waterIntro = true;
   state.nodeAmountsV2 = true;
+  state.cropsUnlocked = [];
   startTutorial(state);
   pushEvent(state, 'ยินดีต้อนรับสู่หมู่บ้านใหม่ของคุณ — ระบายเลือกต้นไม้ให้ชาวบ้านไปตัด แล้วสร้างคนเก็บของป่าและโกดังได้เลย');
   pushEvent(state, '👥 ชาวบ้านยังไม่มีงาน — เปิด "จัดการงาน" แล้วมอบหมายช่างก่อสร้างก่อน จากนั้นจึงส่งคนไปทำงานที่อาคารต่างๆ', {
@@ -361,6 +363,7 @@ function stepWorld(state, dt) {
     updateBuildingStatus(state);
     syncJobs(state);
     updateTutorial(state);
+    updateCrops(state);
     for (const b of state.buildings) if (b.type === 'house' && b.built) evaluateHouse(state, b);
     assignHomes(state);
     planHouses(state, rand);

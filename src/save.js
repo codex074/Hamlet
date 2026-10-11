@@ -9,6 +9,7 @@ import { allOwnedTerritory } from './territory.js';
 import { countNodes } from './regrowth.js';
 import { pushEvent } from './events.js';
 import { ensureTutorial } from './tutorial.js';
+import { ensureCrops } from './farming.js';
 
 const SAVE_KEY = 'hamlet-save-v1';
 const SAVE_VERSION = 4;
@@ -154,6 +155,7 @@ export function deserialize(str) {
   migrateManualJobs(state);
   introduceWater(state);
   ensureTutorial(state);   // villages from before the checklist skip it
+  ensureCrops(state);      // crops their population already allows, without announcing them
   return state;
 }
 

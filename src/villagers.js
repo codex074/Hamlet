@@ -4,11 +4,13 @@ import {
   BUILDINGS, CATHEDRAL_STAGES, FOODS, UPGRADE_BUILD_TIME, DAY_LENGTH, CHILD_PLAY_RADIUS,
   DEATH_AGE_MIN, DEATH_AGE_MAX, THIRST_PER_SEC, THIRSTY_AT, PARCHED_AT, SLEEP_THIRST_MUL, WALK_THIRST_PER_M,
   WALK_HUNGER_PER_M, CARRY_EXERTION_MUL, DRINK_TIME, WAGE_PER_TASK, THIRST_URGENT,
+  CROPS,
 } from './config.js';
 import { nearestFoodSource, buyMeal } from './market.js';
 import { nearestWater } from './water.js';
 import { seasonEffects } from './seasons.js';
 import { planHarvest } from './harvest.js';
+import { cropOf, recordHarvest } from './farming.js';
 import { recordFood } from './status.js';
 import { mulberry32, randRange } from './rng.js';
 import { pickGivenName, pickSurname, fullName } from './names.js';
@@ -215,10 +217,11 @@ function planFarm(state, v, b, cfg, rand) {
   const px = zone.x + Math.cos(ang) * rad;
   const pz = zone.z + Math.sin(ang) * rad;
   const grow = seasonEffects(state).farm;   // winter fields barely yield
-  const wheat = Math.max(1, Math.min(CARRY_MAX, Math.round(cfg.output.wheat * grow * (0.5 + fertilityAt(state.terrain, px, pz)))));
+  const crop = cropOf(b);                    // the player's choice: wheat, corn or beans
+  const n = Math.max(1, Math.min(CARRY_MAX, Math.round(CROPS[crop].n * grow * (0.5 + fertilityAt(state.terrain, px, pz)))));
   v.queue.push(
     gotoPoint(px, pz),
-    { kind: 'produce', bId: b.id, t: workTime(b, cfg.time), out: { wheat } },
+    { kind: 'produce', bId: b.id, t: workTime(b, cfg.time), out: { [crop]: n }, at: { x: px, z: pz } },
     gotoBuilding(store, px, pz),
     { kind: 'put', bId: store.id },
   );
@@ -404,6 +407,7 @@ function execProduce(state, v, t, dt) {
   }
   if (countdown(t, dt) !== DONE) return undefined;
   v.carry = firstEntry(t.out);
+  if (t.at) recordHarvest(state, b, t.at.x, t.at.z);   // field harvest: the plants there are cut
   return DONE;
 }
 
