@@ -11,7 +11,7 @@ export const EDGE_MARGIN = 4;
 export const MAX_SLOPE = 2.5;           // max height difference under a footprint
 
 export const NODE_COUNTS = { tree: 900, rock: 40, berry: 60, ore: 14 };
-export const NODE_AMOUNT = { tree: 4, rock: 60, berry: 12, ore: 80 };
+export const NODE_AMOUNT = { tree: 4, rock: 20, berry: 12, ore: 25 };   // trips before a node is used up
 export const ORE_MIN_HEIGHT = 0.5;      // ore veins only where height >= this fraction of MAX_HEIGHT
 export const BERRY_REGROW_PER_SEC = 1 / 20; // berries regrow per bush per second
 
@@ -66,7 +66,7 @@ export const BUILDINGS = {
   forager:    { name: 'คนเก็บของป่า', category: 'resource', radius: 3.5, cost: { wood: 8 }, buildTime: 15,
                 workers: 4, job: 'gather', node: 'berry', output: { berries: 2 }, time: 6, unlockPop: 0, light: true },
   quarry:     { name: 'เหมืองหิน', category: 'resource', radius: 4, cost: { wood: 12 }, buildTime: 20,
-                workers: 2, job: 'gather', node: 'rock', output: { stone: 2 }, time: 8, unlockPop: 0, retired: true },
+                workers: 2, job: 'gather', node: 'rock', output: { stone: 3 }, time: 8, unlockPop: 0, retired: true },
   sawmill:    { name: 'โรงเลื่อย', category: 'production', radius: 4.5, cost: { wood: 15, stone: 6 }, buildTime: 30,
                 workers: 2, job: 'process', input: { wood: 2 }, output: { planks: 1 }, time: 6, unlockPop: 8 },
   farmhouse:  { name: 'ฟาร์ม', category: 'production', radius: 4.5, cost: { wood: 12, planks: 4 }, buildTime: 30,
@@ -90,7 +90,7 @@ export const BUILDINGS = {
   sheepfarm:  { name: 'คอกแกะ', category: 'resource', radius: 7, cost: { wood: 15, planks: 6 }, buildTime: 35,
                 workers: 2, job: 'ranch', outputs: [{ meat: 2 }, { wool: 2 }], time: 9, unlockPop: 15 },
   ironmine:   { name: 'เหมืองแร่เหล็ก', category: 'resource', radius: 4.5, cost: { wood: 15, planks: 8 }, buildTime: 35,
-                workers: 2, job: 'gather', node: 'ore', output: { ore: 2 }, time: 10, unlockPop: 25, retired: true },
+                workers: 2, job: 'gather', node: 'ore', output: { ore: 3 }, time: 10, unlockPop: 25, retired: true },
   weaver:     { name: 'ช่างทอผ้า', category: 'production', radius: 4, cost: { planks: 12, stone: 4 }, buildTime: 30,
                 workers: 1, job: 'process', input: { wool: 2 }, output: { cloth: 1 }, time: 8, unlockPop: 20, light: true },
   blacksmith: { name: 'โรงตีเหล็ก', category: 'production', radius: 4.5, cost: { planks: 10, stone: 12 }, buildTime: 40,

@@ -234,3 +234,34 @@ test('berry nodes are kept when emptied, gather skips empty nodes', () => {
   assert.notEqual(v.res.nodeId, berry.id);
   assert.ok(berry.amount <= NODE_AMOUNT.berry);
 });
+
+test('at night villagers walk to their own front door and only then go inside (homeless: the townhall)', async () => {
+  const { frontDoor } = await import('../src/villagers.js');
+  const { DAY_LENGTH } = await import('../src/config.js');
+  const { addHouse } = await import('./helpers.js');
+  const s = world();
+  clearVillagers(s);
+  const a = addHouse(s, SPAWN.x + 30, SPAWN.z - 10, 1);
+  const b = addHouse(s, SPAWN.x - 25, SPAWN.z + 20, 1);
+  b.rot = Math.PI / 2;
+  const homeless = addVillager(s, SPAWN.x + 10, SPAWN.z + 10);
+  const [va, vb] = s.villagers.filter((v) => v.homeId != null);
+  for (const v of s.villagers) { v.x = SPAWN.x; v.z = SPAWN.z + 8; v.queue = []; v.hunger = 0; v.thirst = 0; }
+  s.time = DAY_LENGTH * (21.2 / 24);
+  const rand = mulberry32(4);
+  let hiddenAway = 0;
+  for (let i = 0; i < 300; i++) {
+    for (const v of s.villagers) {
+      stepVillager(s, v, 0.1, rand);
+      const home = s.buildings.find((x) => x.id === v.homeId) ?? townhall(s);
+      const door = frontDoor(home);
+      if (v.role === 'sleeping' && Math.hypot(v.x - door.x, v.z - door.z) > 1.5) hiddenAway += 1;
+    }
+  }
+  assert.equal(hiddenAway, 0, 'nobody disappears before reaching their own door');
+  for (const [v, h] of [[va, a], [vb, b], [homeless, townhall(s)]]) {
+    const door = frontDoor(h);
+    assert.equal(v.role, 'sleeping');
+    assert.ok(Math.hypot(v.x - door.x, v.z - door.z) < 1.5, `asleep at ${h.type} door`);
+  }
+});

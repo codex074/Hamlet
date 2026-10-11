@@ -129,12 +129,24 @@ function introduceWater(state) {
   });
 }
 
+// Rocks and ore veins used to hold 60 / 80 trips; they now hold 20 / 25 (each trip carries more), so a
+// half-mined rock in an old save keeps the same share left.
+function rescaleNodes(state) {
+  if (state.nodeAmountsV2) return;
+  state.nodeAmountsV2 = true;
+  for (const n of state.nodes) {
+    if (n.kind === 'rock') n.amount = Math.max(1, Math.ceil(n.amount / 3));
+    else if (n.kind === 'ore') n.amount = Math.max(1, Math.ceil(n.amount * 25 / 80));
+  }
+}
+
 export function deserialize(str) {
   const data = parseSave(str);
   const settings = data.version >= 4 ? normalizeSettings(data.settings) : LEGACY_SETTINGS;
   const terrain = generateTerrain(data.seed, settings, { legacy: data.version < 4 || data.legacyRiver === true });
   const state = { ...data, terrain, wear: Float32Array.from(data.wear) };
   if (data.version < 4) state.settings = { ...LEGACY_SETTINGS };
+  rescaleNodes(state);   // before migrateV1 adds ore veins that already use the new amounts
   if (data.version === 1) migrateV1(state);
   if (data.version <= 2) migrateV2(state);
   if (data.version <= 3) migrateV3(state);

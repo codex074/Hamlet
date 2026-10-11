@@ -159,3 +159,21 @@ test('saves from before manual jobs turn the jobless adults into builders; worke
   const again = deserialize(serialize(back));
   assert.equal(again.villagers.filter((v) => v.builder).length, back.villagers.filter((v) => v.builder).length);
 });
+
+test('rocks and ore veins from older saves are rescaled to the new trip counts (same share left)', () => {
+  const s = createWorld(1);
+  const rock = s.nodes.find((n) => n.kind === 'rock');
+  const ore = s.nodes.find((n) => n.kind === 'ore');
+  const tree = s.nodes.find((n) => n.kind === 'tree');
+  delete s.nodeAmountsV2;
+  rock.amount = 60;
+  ore.amount = 40;
+  const t0 = tree.amount;
+  const back = deserialize(serialize(s));
+  const by = (id) => back.nodes.find((n) => n.id === id);
+  assert.equal(by(rock.id).amount, 20);
+  assert.equal(by(ore.id).amount, Math.ceil(40 * 25 / 80));
+  assert.equal(by(tree.id).amount, t0, 'trees are unchanged');
+  const again = deserialize(serialize(back));
+  assert.equal(again.nodes.find((n) => n.id === rock.id).amount, 20, 'only once');
+});

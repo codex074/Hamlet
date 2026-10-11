@@ -95,6 +95,7 @@ export function createWorld(seed, settings = DEFAULT_SETTINGS) {
   state.animals = createDeer(state);
   state.manualJobs = true;
   state.waterIntro = true;
+  state.nodeAmountsV2 = true;
   startTutorial(state);
   pushEvent(state, 'ยินดีต้อนรับสู่หมู่บ้านใหม่ของคุณ — ระบายเลือกต้นไม้ให้ชาวบ้านไปตัด แล้วสร้างคนเก็บของป่าและโกดังได้เลย');
   pushEvent(state, '👥 ชาวบ้านยังไม่มีงาน — เปิด "จัดการงาน" แล้วมอบหมายช่างก่อสร้างก่อน จากนั้นจึงส่งคนไปทำงานที่อาคารต่างๆ', {

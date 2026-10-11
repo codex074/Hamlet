@@ -652,8 +652,11 @@ export function createNodesView(parent, terrain) {
       if (n.kind === 'tree') {
         const mesh = chunk.meshes[slot];
         const i = slotFill[slot]++;
-        const s = 0.82 + rnd(n.id, 1) * 0.5;
-        eu.set((rnd(n.id, 11) - 0.5) * 0.07, yaw, (rnd(n.id, 12) - 0.5) * 0.07);
+        // every chop shows: the tree shrinks and starts to lean until it is felled
+        const cut = 1 - Math.min(1, n.amount / NODE_AMOUNT.tree);
+        const s = (0.82 + rnd(n.id, 1) * 0.5) * (1 - 0.5 * cut);
+        const lean = cut * 0.32;
+        eu.set((rnd(n.id, 11) - 0.5) * 0.07 + lean, yaw, (rnd(n.id, 12) - 0.5) * 0.07);
         q.setFromEuler(eu);
         pv.set(n.x, h - 0.08, n.z);
         sv.set(s * (0.92 + rnd(n.id, 13) * 0.16), s * (0.9 + rnd(n.id, 3) * 0.3), s * (0.92 + rnd(n.id, 14) * 0.16));
@@ -666,7 +669,7 @@ export function createNodesView(parent, terrain) {
       } else if (n.kind === 'rock') {
         const mesh = chunk.meshes[slot];
         const i = slotFill[slot]++;
-        const s = (0.75 + rnd(n.id, 1) * 0.6) * (0.6 + 0.4 * Math.min(1, n.amount / NODE_AMOUNT.rock));
+        const s = (0.75 + rnd(n.id, 1) * 0.6) * (0.3 + 0.7 * Math.min(1, n.amount / NODE_AMOUNT.rock));
         q.setFromAxisAngle(up, yaw);
         pv.set(n.x, h - 0.1, n.z);
         sv.set(s, s * (0.85 + rnd(n.id, 3) * 0.3), s);
@@ -677,7 +680,7 @@ export function createNodesView(parent, terrain) {
       } else if (n.kind === 'ore') {
         const mesh = chunk.meshes[slot];
         const i = slotFill[slot]++;
-        const s = (0.85 + rnd(n.id, 1) * 0.45) * (0.6 + 0.4 * Math.min(1, n.amount / NODE_AMOUNT.ore));
+        const s = (0.85 + rnd(n.id, 1) * 0.45) * (0.3 + 0.7 * Math.min(1, n.amount / NODE_AMOUNT.ore));
         q.setFromAxisAngle(up, yaw);
         pv.set(n.x, h - 0.1, n.z);
         sv.set(s, s * (0.85 + rnd(n.id, 3) * 0.3), s);

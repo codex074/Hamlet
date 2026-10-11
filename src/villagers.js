@@ -161,12 +161,22 @@ function planRefresh(state, v) {
   return planEat(state, v) || planDrink(state, v);
 }
 
+// The point just outside a building's front door (models face +z, turned by b.rot).
+export function frontDoor(b, gap = 0.4) {
+  const r = (BUILDINGS[b.type]?.radius ?? 2) + gap;
+  const rot = b.rot ?? 0;
+  return { x: b.x + Math.sin(rot) * r, z: b.z + Math.cos(rot) * r };
+}
+
+// At night everyone walks to the front door of their own house (the homeless to the townhall) and only
+// goes inside — disappears — once there; see execSleep.
 function planSleep(state, v) {
   if (!clock(state).isNight) return false;
-  const home = getBuilding(state, v.homeId);
+  const home = getBuilding(state, v.homeId) ?? state.buildings.find((b) => b.type === 'townhall');
   if (!home) return false;
-  v.queue.push(gotoBuilding(home, v.x, v.z), { kind: 'sleep' });
-  v.role = 'sleeping';
+  const door = frontDoor(home);
+  v.queue.push(gotoPoint(door.x, door.z), { kind: 'sleep', bId: home.id });
+  v.role = 'idle';   // walking home; 'sleeping' starts at the door
   return true;
 }
 
@@ -453,8 +463,9 @@ function needsRefresh(state, v) {
 }
 
 function execSleep(state, v) {
-  if (!clock(state).isNight) return DONE;
-  return needsRefresh(state, v) ? DONE : undefined;   // wake up to eat / drink
+  if (!clock(state).isNight || needsRefresh(state, v)) return DONE;   // morning, or up to eat / drink
+  v.role = 'sleeping';   // indoors now: hidden until morning
+  return undefined;
 }
 
 // A sick villager lies down until healed; gets up to eat or drink when needed.
