@@ -657,6 +657,7 @@ export const JOB_ROLE = {
   farmhouse: 'farmer', mill: 'miller', bakery: 'baker', chapel: 'priest', tavern: 'innkeeper',
   fishery: 'fisher', hunter: 'hunter', herbalist: 'herbalist', sheepfarm: 'shepherd', ironmine: 'miner',
   weaver: 'weaver', blacksmith: 'blacksmith', infirmary: 'doctor', market: 'merchant', forester: 'forester',
+  coop: 'shepherd', pigsty: 'shepherd', cattle: 'shepherd',
 };
 
 // Work animation per role (default 'chop').

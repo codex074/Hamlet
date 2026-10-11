@@ -2550,6 +2550,106 @@ function sheepfarm(k, st) {
   bush(k, -4.7, 4.5, 0.4);
 }
 
+// ---------------------------------------------------------------- livestock pens (coop, pigsty, cattle)
+
+// Fence ring of radius r around (0, cz) with a gate gap at the front (+z), skipping the side against a
+// shed whose front edge is at z = shedFront and half-width shedHalf.
+function penRing(k, cz, r, kind, h, shedFront, shedHalf, tc) {
+  const N = Math.max(12, Math.round(r * 3.6));
+  const pts = [];
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    pts.push([Math.sin(a) * r, cz + Math.cos(a) * r]);
+  }
+  const shedSide = (i) => {
+    const j = ((i % N) + N) % N;
+    const mx = (pts[j][0] + pts[j + 1][0]) / 2, mz = (pts[j][1] + pts[j + 1][1]) / 2;
+    return mz < shedFront + 0.2 && Math.abs(mx) < shedHalf + 0.6;
+  };
+  for (let i = 1; i < N; i++) {
+    if (shedSide(i)) continue;
+    fence(k, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], kind, h);
+    if (shedSide(i + 1)) fence(k, pts[i + 1][0], pts[i + 1][1], Math.sign(pts[i + 1][0]) * shedHalf, shedFront, kind, h);
+    if (shedSide(i - 1)) fence(k, pts[i][0], pts[i][1], Math.sign(pts[i][0]) * shedHalf, shedFront, kind, h);
+  }
+  k.box('timber', 0.14, h + 0.3, 0.14, 0, 0, pts[0][1] - 0.05, { c: tc });   // gate post
+  k.box('timber', 0.14, h + 0.3, 0.14, pts[1][0], 0, pts[1][1], { c: tc });
+}
+
+function feedTrough(k, x, z, ry, len = 1.3, fill = 0xd8b45a) {
+  k.push(x, 0, z, ry);
+  k.box('planks', len, 0.3, 0.42, 0, 0, 0, { c: 0xa87f50, nb: true });
+  k.box('flat', len - 0.15, 0.04, 0.3, 0, 0.27, 0, { c: fill, ao: false });
+  k.pop();
+}
+
+// Simple gabled shed: w x d, wall height h, door on the front.
+function shed(k, st, { x = 0, z, w, d, h, roof = 'thatch', tint = 0xcfae7c, y0 = 0.2 }) {
+  const tc = TIMBERS[1];
+  k.push(x, 0, z, 0);
+  k.box('stone', w + 0.2, y0, d + 0.2, 0, 0, 0, { c: st.stone, nb: true });
+  storey(k, {
+    w, d, h, y: y0, mat: 'planks', tint, frame: true, tc, st, sp: 1.4, bp: 0.5,
+    f: [{ t: 'door', x: 0, w: Math.min(1.4, w * 0.4), h: Math.min(1.6, h * 0.85), step: false },
+      { t: 'win', x: w * 0.32, y: h * 0.55, w: 0.4, h: 0.4, shut: true, shutc: st.shut }],
+    r: [], l: [], b: [],
+  });
+  gableRoof(k, { w, d, y: y0 + h, type: roof, R: Math.max(1, d * 0.45), ox: 0.3, oz: 0.4, tint: roof === 'thatch' ? st.thatch : undefined, fill: { key: 'planks', tint }, tc });
+  k.pop();
+}
+
+function coop(k, st) {
+  const tc = TIMBERS[1];
+  k.pen = { x: 0, z: 1.0, r: 2.7 };
+  // raised hen house on stilts with a ramp
+  k.push(0, 0, -1.9, 0);
+  for (const [sx, sz] of [[-0.9, -0.6], [0.9, -0.6], [-0.9, 0.6], [0.9, 0.6]]) k.box('timber', 0.12, 0.7, 0.12, sx, 0, sz, { c: tc });
+  k.push(0, 0.7, 0, 0);
+  storey(k, {
+    w: 2.0, d: 1.4, h: 1.0, y: 0, mat: 'planks', tint: 0xd8b88a, frame: true, tc, st, sp: 1.0, bp: 0.4,
+    f: [{ t: 'door', x: 0.45, w: 0.4, h: 0.5, step: false }, { t: 'win', x: -0.45, y: 0.55, w: 0.3, h: 0.3, shut: true, shutc: st.shut }],
+    r: [], l: [], b: [],
+  });
+  gableRoof(k, { w: 2.0, d: 1.4, y: 1.0, type: 'shingles', R: 0.7, ox: 0.2, oz: 0.25, fill: { key: 'planks', tint: 0xd8b88a }, tc });
+  k.pop();
+  k.bar('planks', [0.45, 0.72, 0.78], [0.45, 0.02, 1.9], 0.34, 0.04, { c: 0xa87f50 });   // ramp
+  for (let i = 0; i < 4; i++) k.box('timber', 0.34, 0.03, 0.03, 0.45, 0.62 - i * 0.17, 1.0 + i * 0.25, { c: 0x6a4a2c });
+  k.pop();
+  penRing(k, 1.0, 3.1, 'picket', 0.6, -1.2, 1.2, tc);
+  feedTrough(k, -1.7, 1.6, 0.6, 0.9);
+  k.cyl('flat', 0.22, 0.2, 0.12, 1.6, 0, 1.9, 7, { c: 0x8d9aa0, caps: 'top', ao: false });   // water bowl
+  hayBale(k, 2.6, -1.6, 0, 0.3, 0.7);
+  sack(k, -2.4, -1.4, 0, 0xdad0b0, 0.8);
+}
+
+function pigsty(k, st) {
+  const tc = TIMBERS[1];
+  k.pen = { x: 0, z: 1.4, r: 3.3 };
+  shed(k, st, { z: -3.0, w: 3.6, d: 2.4, h: 1.5, roof: 'thatch', tint: 0xc9a878 });
+  // mud wallow in the middle of the pen
+  // slabs reach below ground so the mud still shows where the pen slopes
+  k.cyl('flat', 2.0, 2.1, 0.45, 0.4, -0.38, 1.8, 14, { c: 0x6a4a30, caps: 'top', j: 0.05, ao: false });
+  k.cyl('flat', 1.1, 1.2, 0.47, 0.6, -0.38, 2.1, 10, { c: 0x5a3c26, caps: 'top', ao: false });
+  penRing(k, 1.4, 3.9, 'wattle', 0.7, -1.7, 1.9, tc);
+  feedTrough(k, -2.4, 3.2, -0.6, 1.4, 0xe0c040);
+  feedTrough(k, 2.6, 0.2, 1.2, 1.0, 0x6aa8c8);   // water
+  sack(k, 2.4, -3.2, 0, 0xcdb98a);
+  barrel(k, -2.6, -2.8, 0, 0.85);
+}
+
+function cattle(k, st) {
+  const tc = TIMBERS[1];
+  k.pen = { x: 0, z: 2.2, r: 4.6 };
+  shed(k, st, { z: -4.6, w: 6.0, d: 3.6, h: 2.3, roof: 'thatch', tint: 0xb98a5a });
+  penRing(k, 2.2, 5.6, 'rail', 0.95, -2.6, 3.1, tc);
+  feedTrough(k, -3.6, 4.6, -0.7, 1.8);
+  feedTrough(k, 3.9, 1.2, 1.0, 1.5, 0x6aa8c8);
+  hayBale(k, 4.2, -3.6, 0, 0.4, 1);
+  hayBale(k, 4.6, -2.8, 0.55, 0.9, 0.9);
+  hayBale(k, -4.4, -3.4, 0, 1.2, 1);
+  bush(k, -5.6, 5.6, 0.45);
+}
+
 // ---------------------------------------------------------------- iron mine
 
 function oreChunk(k, x, y, z, s, seed) {
@@ -3445,7 +3545,7 @@ function styleFor(seed) {
 const BUILDERS = {
   townhall, storehouse, woodcutter, forager, quarry, sawmill, farmhouse, mill, bakery, chapel, tavern,
   fishery, hunter, herbalist, forester, sheepfarm, ironmine, weaver, blacksmith, infirmary, market,
-  well: wellBuilding,
+  well: wellBuilding, coop, pigsty, cattle,
 };
 
 export function makeBuildingModel(type, { level = 1, stage = 0, seed = 0 } = {}) {

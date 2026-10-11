@@ -18,7 +18,7 @@ const BUILDING_ICON = {
   storehouse: '📦', woodcutter: '🪓', forager: '🧺', quarry: '⛏️', sawmill: '🪚',
   farmhouse: '🌾', mill: '🌬️', bakery: '🥖', chapel: '⛪', tavern: '🍺', cathedral: '🏰',
   fishery: '🎣', hunter: '🏹', herbalist: '🌿', sheepfarm: '🐑', ironmine: '⚒️',
-  weaver: '🧵', blacksmith: '🛠️', infirmary: '🏥', market: '🏪', forester: '🌱', well: '🪣',
+  weaver: '🧵', blacksmith: '🛠️', infirmary: '🏥', market: '🏪', forester: '🌱', well: '🪣', coop: '🐔', pigsty: '🐖', cattle: '🐄',
 };
 
 const BUILDING_DESC = {
@@ -36,6 +36,9 @@ const BUILDING_DESC = {
   hunter: `นักล่าออกล่ากวางป่าในรัศมี ${HUNT_RADIUS} ม. แล้วส่งเนื้อเข้าโกดัง กวางมีจำนวนจำกัดแต่เกิดใหม่เรื่อยๆ`,
   herbalist: `เก็บสมุนไพรตามต้นไม้ในรัศมี ${GATHER_RADIUS} ม. โดยไม่ทำให้ต้นไม้หมด สมุนไพรใช้รักษาคนป่วยที่สถานพยาบาล`,
   sheepfarm: 'คอกแกะ เลี้ยงแกะสลับให้เนื้อและขนแกะ ขนแกะส่งต่อให้ช่างทอผ้า',
+  coop: 'เลี้ยงไก่ด้วยเมล็ดพืช (ข้าวสาลี ข้าวโพด หรือถั่ว) ได้เนื้อไก่ งานเบา ผู้สูงอายุทำได้',
+  pigsty: 'เลี้ยงหมูด้วยข้าวโพด ถั่ว หรือเบอร์รี่ ได้เนื้อหมู',
+  cattle: 'เลี้ยงวัวด้วยข้าวสาลี ข้าวโพด หรือถั่ว ได้เนื้อวัวมากที่สุดต่อรอบ',
   ironmine: 'ขุดแร่เหล็กจากเส้นแร่บนที่สูง ส่งต่อให้โรงตีเหล็กทำเครื่องมือ',
   weaver: 'ทอขนแกะเป็นผ้า ผ้าไปเติมที่ตลาดเพื่อให้บ้านระดับสูงมีเสื้อผ้า',
   blacksmith: 'ตีแร่เหล็กเป็นเครื่องมือ อาคารผลิตที่มีเครื่องมือจะทำงานเร็วขึ้น และใช้อัปเกรดบ้านระดับสูงสุด',
@@ -120,6 +123,7 @@ function jobLine(type) {
   else if (d.job === 'fish') parts.push(`ตกปลา (ติดน้ำ, รัศมี ${FISH_RADIUS} ม.) → ${resNames(d.output)}`);
   else if (d.job === 'hunt') parts.push(`ล่ากวาง (รัศมี ${HUNT_RADIUS} ม.) → ${resNames(d.output)}`);
   else if (d.job === 'ranch') parts.push(`เลี้ยงแกะ → ${(d.outputs || []).map(resNames).join(' / ')}`);
+  else if (d.job === 'livestock') parts.push(`อาหารสัตว์ ${d.feed.map((r) => info(r).icon).join('/')} ×${d.feedPer} → ${resNames(d.output)}`);
   else if (d.job === 'quarry') parts.push(`ขุดหินไม่จำกัด → ${resNames(d.output)} · ⚠️ เสี่ยงอุบัติเหตุ`);
   else if (d.job === 'market') parts.push(`ขายอาหาร/ผ้าได้ 4 รายการ · ชาวบ้านซื้อด้วยเงินค่าจ้าง · มีบ่อน้ำ`);
   else if (d.job === 'doctor') {

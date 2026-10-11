@@ -16,7 +16,7 @@ export const JOB_TITLE = {
   woodcutter: 'คนตัดไม้', forager: 'คนเก็บของป่า', quarry: 'ช่างหิน', sawmill: 'ช่างเลื่อย', farmhouse: 'ชาวนา',
   mill: 'คนโม่แป้ง', bakery: 'คนทำขนมปัง', chapel: 'นักบวช', tavern: 'เจ้าของโรงเตี๊ยม', fishery: 'ชาวประมง',
   hunter: 'นักล่า', herbalist: 'คนเก็บสมุนไพร', forester: 'คนปลูกป่า', sheepfarm: 'คนเลี้ยงแกะ',
-  ironmine: 'คนงานเหมือง', weaver: 'ช่างทอผ้า', blacksmith: 'ช่างตีเหล็ก', infirmary: 'หมอ', market: 'พ่อค้า',
+  ironmine: 'คนงานเหมือง', coop: 'คนเลี้ยงไก่', pigsty: 'คนเลี้ยงหมู', cattle: 'คนเลี้ยงวัว', weaver: 'ช่างทอผ้า', blacksmith: 'ช่างตีเหล็ก', infirmary: 'หมอ', market: 'พ่อค้า',
 };
 export const BUILDER_TITLE = 'ช่างก่อสร้าง';
 

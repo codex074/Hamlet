@@ -67,7 +67,7 @@ test('names: enough Thai-script male, female and family names', () => {
 
 test('light flag marks the elder-friendly buildings', () => {
   const light = Object.entries(BUILDINGS).filter(([, b]) => b.light).map(([k]) => k).sort();
-  assert.deepEqual(light, ['bakery', 'chapel', 'forager', 'forester', 'herbalist', 'infirmary', 'market', 'tavern', 'weaver']);
+  assert.deepEqual(light, ['bakery', 'chapel', 'coop', 'forager', 'forester', 'herbalist', 'infirmary', 'market', 'tavern', 'weaver']);
 });
 
 test('start: 3 married couples with distinct surnames + 2 single adults, all with names and death ages', () => {

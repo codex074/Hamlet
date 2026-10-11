@@ -1,10 +1,10 @@
-// Animals: render-only sheep inside every built sheepfarm pen, and deer driven by state.animals.
+// Animals: render-only flocks inside farm pens (sheep, pigs, cows, chickens) and deer driven by state.animals.
 // Everything is instanced (one InstancedMesh per body part), vertex-coloured, flat/soft shaded and animated by
 // writing per-instance matrices every frame (allocation-free: only module-level scratch objects are touched).
 // Node-safe: no `document` / WebGL needed at import time.
 //
 //   createAnimalsView(parent, terrain) -> { update(state, dt, buildingGroups), dispose() }
-//     state.buildings   [{ id, type, built, upgrading }]  -> sheep for each built 'sheepfarm'
+//     state.buildings   [{ id, type, built, upgrading }]  -> a flock for each built sheepfarm / pigsty / cattle / coop
 //     buildingGroups    Map buildingId -> THREE.Group (world.js); the group's userData.pen = { x, z, r } is the
 //                       local pen centre / radius; sheep wander + graze inside it (converted with matrixWorld)
 //     state.animals     [{ id, kind: 'deer', x, z, tx, tz, wait }] -> smoothly interpolated deer
@@ -14,7 +14,6 @@ import { DEER_COUNT } from '../config.js';
 
 export const SHEEP_PER_FARM = 6;
 const MAX_FARMS = 16;
-const SHEEP_CAP = MAX_FARMS * SHEEP_PER_FARM;
 const DEER_CAP = Math.max(24, (DEER_COUNT || 24) * 2) + 8;
 
 // ------------------------------------------------------------------ geometry building
@@ -131,6 +130,102 @@ function sheepLeg() {
   return finish(b);
 }
 
+// ---- pig (facing +z) ----
+
+const PIG = 0xeba7a0;
+const PIG_D = 0xd88d88;
+
+function pigBody() {
+  const b = builder();
+  ell(b, 0, 0.42, 0, 0.27, 0.25, 0.44, PIG, { detail: 1, shade: 0.25 });
+  ell(b, 0, 0.47, -0.42, 0.04, 0.04, 0.04, PIG_D, { detail: 0 });            // curly tail
+  ell(b, 0.03, 0.53, -0.45, 0.03, 0.03, 0.03, PIG_D, { detail: 0 });
+  return finish(b);
+}
+function pigHead() {
+  const b = builder();
+  ell(b, 0, 0, 0.12, 0.17, 0.16, 0.17, PIG, { detail: 1, shade: 0.2 });
+  ell(b, 0, -0.03, 0.29, 0.08, 0.065, 0.04, PIG_D, { detail: 0, shade: 0.1 }); // snout
+  ell(b, 0.03, -0.03, 0.33, 0.012, 0.016, 0.006, 0x5a2e2a, { detail: 0 });
+  ell(b, -0.03, -0.03, 0.33, 0.012, 0.016, 0.006, 0x5a2e2a, { detail: 0 });
+  ell(b, 0.11, 0.13, 0.08, 0.07, 0.03, 0.06, PIG_D, { detail: 0, ez: -0.6 });  // ears
+  ell(b, -0.11, 0.13, 0.08, 0.07, 0.03, 0.06, PIG_D, { detail: 0, ez: 0.6 });
+  ell(b, 0.07, 0.06, 0.25, 0.015, 0.015, 0.012, 0x1e1614, { detail: 0 });
+  ell(b, -0.07, 0.06, 0.25, 0.015, 0.015, 0.012, 0x1e1614, { detail: 0 });
+  return finish(b);
+}
+function pigLeg() {
+  const b = builder();
+  bar(b, [0, 0, 0], [0, -0.22, 0], 0.055, 0.045, PIG, 5);
+  ell(b, 0, -0.23, 0.01, 0.045, 0.025, 0.05, 0x4a3a34, { detail: 0, shade: 0 });
+  return finish(b);
+}
+
+// ---- cow (facing +z) ----
+
+const COW = 0xf2ece0;
+const COW_PATCH = 0x3a2a22;
+
+function cowBody() {
+  const b = builder();
+  ell(b, 0, 0.82, 0, 0.34, 0.33, 0.62, COW, { detail: 1, shade: 0.22 });
+  ell(b, 0.2, 0.92, 0.15, 0.17, 0.2, 0.24, COW_PATCH, { detail: 0, shade: 0.1 });   // patches
+  ell(b, -0.18, 0.8, -0.25, 0.18, 0.22, 0.22, COW_PATCH, { detail: 0, shade: 0.1 });
+  ell(b, 0.05, 1.05, -0.35, 0.16, 0.08, 0.16, COW_PATCH, { detail: 0, shade: 0.1 });
+  ell(b, 0, 0.5, -0.2, 0.11, 0.07, 0.1, 0xe8a8a0, { detail: 0 });                    // udder
+  bar(b, [0, 0.95, -0.6], [0.02, 0.45, -0.7], 0.025, 0.02, COW, 4);                   // tail
+  ell(b, 0.02, 0.43, -0.71, 0.04, 0.07, 0.04, COW_PATCH, { detail: 0 });
+  return finish(b);
+}
+function cowHead() {
+  const b = builder();
+  ell(b, 0, 0, 0.16, 0.15, 0.17, 0.25, COW, { detail: 1, shade: 0.15 });
+  ell(b, 0.04, 0.06, 0.12, 0.1, 0.1, 0.12, COW_PATCH, { detail: 0, shade: 0.05 });
+  ell(b, 0, -0.07, 0.38, 0.11, 0.09, 0.07, 0xe0a8a0, { detail: 0, shade: 0.1 });     // muzzle
+  ell(b, 0.18, 0.08, 0.06, 0.09, 0.035, 0.05, COW, { detail: 0, ez: -0.3 });         // ears
+  ell(b, -0.18, 0.08, 0.06, 0.09, 0.035, 0.05, COW, { detail: 0, ez: 0.3 });
+  bar(b, [0.09, 0.14, 0.06], [0.2, 0.24, 0.05], 0.025, 0.012, 0xe8dcc0, 4);          // horns
+  bar(b, [-0.09, 0.14, 0.06], [-0.2, 0.24, 0.05], 0.025, 0.012, 0xe8dcc0, 4);
+  ell(b, 0.1, 0.05, 0.3, 0.018, 0.018, 0.015, 0x1e1614, { detail: 0 });
+  ell(b, -0.1, 0.05, 0.3, 0.018, 0.018, 0.015, 0x1e1614, { detail: 0 });
+  return finish(b);
+}
+function cowLeg() {
+  const b = builder();
+  bar(b, [0, 0, 0], [0, -0.52, 0], 0.075, 0.05, COW, 5);
+  ell(b, 0, -0.54, 0.01, 0.055, 0.035, 0.065, 0x2a2420, { detail: 0, shade: 0 });
+  return finish(b);
+}
+
+// ---- chicken (facing +z) ----
+
+const HEN = 0xf6f1e4;
+
+function henBody() {
+  const b = builder();
+  ell(b, 0, 0.2, 0, 0.11, 0.11, 0.14, HEN, { detail: 1, shade: 0.25 });
+  ell(b, 0, 0.27, -0.13, 0.06, 0.09, 0.05, HEN, { detail: 0, ex: -0.5 });            // tail
+  ell(b, 0.1, 0.21, 0, 0.03, 0.07, 0.1, 0xe8e0cc, { detail: 0 });                     // wings
+  ell(b, -0.1, 0.21, 0, 0.03, 0.07, 0.1, 0xe8e0cc, { detail: 0 });
+  return finish(b);
+}
+function henHead() {
+  const b = builder();
+  ell(b, 0, 0.04, 0.04, 0.06, 0.07, 0.06, HEN, { detail: 1, shade: 0.15 });
+  ell(b, 0, 0.12, 0.04, 0.015, 0.035, 0.04, 0xd8342a, { detail: 0 });                 // comb
+  ell(b, 0, 0.01, 0.09, 0.012, 0.025, 0.015, 0xd8342a, { detail: 0 });                // wattle
+  ell(b, 0, 0.04, 0.11, 0.02, 0.012, 0.03, 0xe8b030, { detail: 0 });                  // beak
+  ell(b, 0.04, 0.06, 0.07, 0.008, 0.008, 0.008, 0x1e1614, { detail: 0 });
+  ell(b, -0.04, 0.06, 0.07, 0.008, 0.008, 0.008, 0x1e1614, { detail: 0 });
+  return finish(b);
+}
+function henLeg() {
+  const b = builder();
+  bar(b, [0, 0, 0], [0, -0.11, 0], 0.012, 0.01, 0xe0a83a, 4);
+  ell(b, 0, -0.115, 0.02, 0.02, 0.006, 0.03, 0xe0a83a, { detail: 0, shade: 0 });
+  return finish(b);
+}
+
 // ---- deer (facing +z) ----
 
 const FUR = 0x8f5f33;
@@ -221,10 +316,6 @@ export function createAnimalsView(parent, terrain) {
     return mesh;
   }
 
-  // sheep parts
-  const sBody = mk('sheep-body', sheepBody(), SHEEP_CAP);
-  const sHead = mk('sheep-head', sheepHead(), SHEEP_CAP);
-  const sLeg = mk('sheep-legs', sheepLeg(), SHEEP_CAP * 4);
   // deer parts
   const dBody = mk('deer-body', deerBody(), DEER_CAP);
   const dHead = mk('deer-head', deerHead(), DEER_CAP);
@@ -253,158 +344,199 @@ export function createAnimalsView(parent, terrain) {
     return outM;
   }
 
-  // ---------------------------------------------------------------- sheep
-  // Block per farm (SHEEP_PER_FARM sheep). Positions are local offsets from the pen centre.
-  const farmOf = new Map();               // building id -> block index
-  const blockFarm = new Int32Array(MAX_FARMS).fill(-1);
-  const blockSeen = new Int32Array(MAX_FARMS);
-  const blockGroup = new Array(MAX_FARMS).fill(null);
-  const sx = new Float32Array(SHEEP_CAP);
-  const sz = new Float32Array(SHEEP_CAP);
-  const stx = new Float32Array(SHEEP_CAP);
-  const stz = new Float32Array(SHEEP_CAP);
-  const syaw = new Float32Array(SHEEP_CAP);
-  const sspd = new Float32Array(SHEEP_CAP);
-  const stimer = new Float32Array(SHEEP_CAP);
-  const sphase = new Float32Array(SHEEP_CAP);
-  const sgraze = new Float32Array(SHEEP_CAP);   // 0..1 head-down blend
-  const sstate = new Uint8Array(SHEEP_CAP);     // 0 graze, 1 walk
+  // ---------------------------------------------------------------- pen animals
+  // One flock per built farm of `spec.type`, wandering and grazing inside its model's userData.pen. Positions
+  // are local offsets from the pen centre; one block of `spec.per` animals per farm.
   let frame = 0;
   let time = 0;
   let rs = 12345;
   const rand = () => { rs = (Math.imul(rs, 1664525) + 1013904223) >>> 0; return rs / 4294967296; };
 
-  function pickTarget(i, pen) {
-    const a = rand() * Math.PI * 2;
-    const r = Math.sqrt(rand()) * pen.r * 0.92;
-    stx[i] = Math.sin(a) * r;
-    stz[i] = Math.cos(a) * r;
+  function createFlock(spec) {
+    const per = spec.per;
+    const cap = MAX_FARMS * per;
+    const nLegs = spec.legs.length;
+    const body = mk(`${spec.name}-body`, spec.body(), cap);
+    const head = mk(`${spec.name}-head`, spec.head(), cap);
+    const legs = mk(`${spec.name}-legs`, spec.leg(), cap * nLegs);
+    const farmOf = new Map();               // building id -> block index
+    const blockFarm = new Int32Array(MAX_FARMS).fill(-1);
+    const blockSeen = new Int32Array(MAX_FARMS);
+    const blockGroup = new Array(MAX_FARMS).fill(null);
+    const ax = new Float32Array(cap);
+    const az = new Float32Array(cap);
+    const atx = new Float32Array(cap);
+    const atz = new Float32Array(cap);
+    const ayaw = new Float32Array(cap);
+    const aspd = new Float32Array(cap);
+    const atimer = new Float32Array(cap);
+    const aphase = new Float32Array(cap);
+    const agraze = new Float32Array(cap);   // 0..1 head-down blend
+    const astate = new Uint8Array(cap);     // 0 graze, 1 walk
+
+    function pickTarget(i, pen) {
+      const a = rand() * Math.PI * 2;
+      const r = Math.sqrt(rand()) * pen.r * 0.92;
+      atx[i] = Math.sin(a) * r;
+      atz[i] = Math.cos(a) * r;
+    }
+
+    function allocBlock(id, pen) {
+      for (let b = 0; b < MAX_FARMS; b++) {
+        if (blockFarm[b] !== -1) continue;
+        blockFarm[b] = id;
+        farmOf.set(id, b);
+        for (let k = 0; k < per; k++) {
+          const i = b * per + k;
+          const a = rand() * Math.PI * 2;
+          const r = Math.sqrt(rand()) * pen.r * 0.85;
+          ax[i] = Math.sin(a) * r; az[i] = Math.cos(a) * r;
+          ayaw[i] = rand() * Math.PI * 2;
+          aspd[i] = 0; aphase[i] = rand() * 6.28; agraze[i] = 0;
+          astate[i] = 0; atimer[i] = rand() * 4;
+          pickTarget(i, pen);
+        }
+        return b;
+      }
+      return -1;
+    }
+
+    function update(state, dt, groups) {
+      let n = 0;
+      for (const b of state.buildings || []) {
+        if (b.type !== spec.type || !b.built || b.upgrading) continue;
+        const g = groups && groups.get(b.id);
+        const pen = g && g.userData && g.userData.pen;
+        if (!pen) continue;
+        let blk = farmOf.get(b.id);
+        if (blk === undefined) {
+          blk = allocBlock(b.id, pen);
+          if (blk < 0) continue;
+          g.updateMatrixWorld(true);
+        }
+        blockSeen[blk] = frame;
+        blockGroup[blk] = g;
+      }
+      // release blocks whose farm vanished
+      for (let b = 0; b < MAX_FARMS; b++) {
+        if (blockFarm[b] !== -1 && blockSeen[b] !== frame) { farmOf.delete(blockFarm[b]); blockFarm[b] = -1; blockGroup[b] = null; }
+      }
+      const sep2 = spec.sep * spec.sep;
+      for (let b = 0; b < MAX_FARMS; b++) {
+        if (blockFarm[b] === -1) continue;
+        const g = blockGroup[b];
+        const pen = g.userData.pen;
+        g.updateMatrixWorld();
+        const e = g.matrixWorld.elements;
+        const gyaw = Math.atan2(e[8], e[0]);
+        const gs = Math.hypot(e[0], e[8]) || 1;
+        const lim = pen.r * 0.95;
+        for (let k = 0; k < per; k++) {
+          const i = b * per + k;
+          // --- behaviour: graze a while, then walk to a new spot
+          let want = 0;
+          if (astate[i] === 0) {
+            atimer[i] -= dt;
+            if (atimer[i] <= 0) { astate[i] = 1; pickTarget(i, pen); }
+          } else {
+            const dx = atx[i] - ax[i], dz = atz[i] - az[i];
+            const d = Math.hypot(dx, dz);
+            if (d < 0.2) { astate[i] = 0; atimer[i] = spec.rest[0] + rand() * spec.rest[1]; }
+            else {
+              const dy = wrapPi(Math.atan2(dx, dz) - ayaw[i]);
+              ayaw[i] += dy * Math.min(1, dt * 4);
+              want = spec.speed * (1 + 0.27 * hash01(i));
+              if (Math.abs(dy) > 1.0) want *= 0.3;
+            }
+          }
+          aspd[i] += (want - aspd[i]) * Math.min(1, dt * 4);
+          ax[i] += Math.sin(ayaw[i]) * aspd[i] * dt;
+          az[i] += Math.cos(ayaw[i]) * aspd[i] * dt;
+          // --- soft separation from flock mates
+          for (let j = b * per; j < b * per + per; j++) {
+            if (j === i) continue;
+            const ox = ax[i] - ax[j], oz = az[i] - az[j];
+            const dd = ox * ox + oz * oz;
+            if (dd < sep2 && dd > 1e-6) {
+              const d = Math.sqrt(dd);
+              const push = (spec.sep - d) * 0.5 * Math.min(1, dt * 6);
+              ax[i] += (ox / d) * push; az[i] += (oz / d) * push;
+            }
+          }
+          const r2 = Math.hypot(ax[i], az[i]);
+          if (r2 > lim) { ax[i] *= lim / r2; az[i] *= lim / r2; }
+          // --- pose
+          const grazing = astate[i] === 0 ? 1 : 0;
+          agraze[i] += (grazing - agraze[i]) * Math.min(1, dt * 3);
+          aphase[i] += aspd[i] * dt * spec.stride;
+          const lx = pen.x + ax[i], lz = pen.z + az[i];
+          const wx = e[0] * lx + e[8] * lz + e[12];
+          const wz = e[2] * lx + e[10] * lz + e[14];
+          const wy = heightAt(terrain, wx, wz);
+          const walk = clamp01(aspd[i] / spec.speed);
+          const bob = Math.abs(Math.sin(aphase[i])) * spec.bob * walk;
+          const sc = (spec.scale[0] + hash01(i + 3) * spec.scale[1]) * gs;
+          qy.setFromAxisAngle(_Y, ayaw[i] + gyaw);
+          pos.set(wx, wy + bob, wz);
+          scl.set(sc, sc, sc);
+          bodyM.compose(pos, qy, scl);
+          body.setMatrixAt(n, bodyM);
+          // head: down grazing / pecking, gently nodding while walking
+          const nib = spec.peck ? Math.max(0, Math.sin(time * spec.peck + i * 1.7)) : 0.1 * Math.sin(time * 5 + i * 1.7);
+          const pitch = agraze[i] * (spec.graze + nib) + (1 - agraze[i]) * (0.12 + 0.06 * Math.sin(aphase[i] * 2));
+          const h = spec.headAt;
+          head.setMatrixAt(n, part(h[0], h[1], h[2], pitch));
+          // legs swing in diagonal pairs while walking
+          const sw = Math.sin(aphase[i]) * spec.swing * walk;
+          for (let L = 0; L < nLegs; L++) {
+            const lg = spec.legs[L];
+            legs.setMatrixAt(n * nLegs + L, part(lg[0], lg[1], lg[2], (L === 0 || L === 3) ? sw : -sw));
+          }
+          spec.tint(i, tint);
+          body.setColorAt(n, tint);
+          head.setColorAt(n, spec.headTint ? spec.headTint(i, tint) : tint);
+          n++;
+        }
+      }
+      body.count = n; head.count = n; legs.count = n * nLegs;
+      body.instanceMatrix.needsUpdate = true;
+      head.instanceMatrix.needsUpdate = true;
+      legs.instanceMatrix.needsUpdate = true;
+      body.instanceColor.needsUpdate = true;
+      head.instanceColor.needsUpdate = true;
+    }
+
+    return { update };
   }
 
-  function allocBlock(id, pen) {
-    for (let b = 0; b < MAX_FARMS; b++) {
-      if (blockFarm[b] !== -1) continue;
-      blockFarm[b] = id;
-      farmOf.set(id, b);
-      for (let k = 0; k < SHEEP_PER_FARM; k++) {
-        const i = b * SHEEP_PER_FARM + k;
-        const a = rand() * Math.PI * 2;
-        const r = Math.sqrt(rand()) * pen.r * 0.85;
-        sx[i] = Math.sin(a) * r; sz[i] = Math.cos(a) * r;
-        syaw[i] = rand() * Math.PI * 2;
-        sspd[i] = 0; sphase[i] = rand() * 6.28; sgraze[i] = 0;
-        sstate[i] = 0; stimer[i] = rand() * 4;
-        pickTarget(i, pen);
-      }
-      return b;
-    }
-    return -1;
-  }
-
-  function updateSheep(state, dt, groups) {
-    let n = 0;
-    const blds = state.buildings || [];
-    for (let bi = 0; bi < blds.length; bi++) {
-      const b = blds[bi];
-      if (b.type !== 'sheepfarm' || !b.built || b.upgrading) continue;
-      const g = groups && groups.get(b.id);
-      const pen = g && g.userData && g.userData.pen;
-      if (!pen) continue;
-      let blk = farmOf.get(b.id);
-      if (blk === undefined) {
-        blk = allocBlock(b.id, pen);
-        if (blk < 0) continue;
-        g.updateMatrixWorld(true);
-      }
-      blockSeen[blk] = frame;
-      blockGroup[blk] = g;
-    }
-    // release blocks whose farm vanished
-    for (let b = 0; b < MAX_FARMS; b++) {
-      if (blockFarm[b] !== -1 && blockSeen[b] !== frame) { farmOf.delete(blockFarm[b]); blockFarm[b] = -1; blockGroup[b] = null; }
-    }
-    for (let b = 0; b < MAX_FARMS; b++) {
-      if (blockFarm[b] === -1) continue;
-      const g = blockGroup[b];
-      const pen = g.userData.pen;
-      g.updateMatrixWorld();
-      const e = g.matrixWorld.elements;
-      const gyaw = Math.atan2(e[8], e[0]);
-      const gs = Math.hypot(e[0], e[8]) || 1;
-      const lim = pen.r * 0.95;
-      for (let k = 0; k < SHEEP_PER_FARM; k++) {
-        const i = b * SHEEP_PER_FARM + k;
-        // --- behaviour
-        let want = 0;
-        if (sstate[i] === 0) {
-          stimer[i] -= dt;
-          if (stimer[i] <= 0) { sstate[i] = 1; pickTarget(i, pen); }
-        } else {
-          const dx = stx[i] - sx[i], dz = stz[i] - sz[i];
-          const d = Math.hypot(dx, dz);
-          if (d < 0.2) { sstate[i] = 0; stimer[i] = 2.5 + rand() * 5; }
-          else {
-            const dy = wrapPi(Math.atan2(dx, dz) - syaw[i]);
-            syaw[i] += dy * Math.min(1, dt * 4);
-            want = 0.55 + 0.15 * hash01(i) ;
-            if (Math.abs(dy) > 1.0) want *= 0.3;
-          }
-        }
-        sspd[i] += (want - sspd[i]) * Math.min(1, dt * 4);
-        sx[i] += Math.sin(syaw[i]) * sspd[i] * dt;
-        sz[i] += Math.cos(syaw[i]) * sspd[i] * dt;
-        // --- soft separation from flock mates
-        for (let j = b * SHEEP_PER_FARM; j < b * SHEEP_PER_FARM + SHEEP_PER_FARM; j++) {
-          if (j === i) continue;
-          const ox = sx[i] - sx[j], oz = sz[i] - sz[j];
-          const dd = ox * ox + oz * oz;
-          if (dd < 0.36 && dd > 1e-6) {
-            const d = Math.sqrt(dd);
-            const push = (0.6 - d) * 0.5 * Math.min(1, dt * 6);
-            sx[i] += (ox / d) * push; sz[i] += (oz / d) * push;
-          }
-        }
-        const r2 = Math.hypot(sx[i], sz[i]);
-        if (r2 > lim) { sx[i] *= lim / r2; sz[i] *= lim / r2; }
-        // --- pose
-        const grazing = sstate[i] === 0 ? 1 : 0;
-        sgraze[i] += (grazing - sgraze[i]) * Math.min(1, dt * 3);
-        sphase[i] += sspd[i] * dt * 9;
-        const lx = pen.x + sx[i], lz = pen.z + sz[i];
-        const wx = e[0] * lx + e[8] * lz + e[12];
-        const wz = e[2] * lx + e[10] * lz + e[14];
-        const wy = heightAt(terrain, wx, wz);
-        const walk = clamp01(sspd[i] / 0.55);
-        const bob = Math.abs(Math.sin(sphase[i])) * 0.025 * walk;
-        const sc = (0.92 + hash01(i + 3) * 0.2) * gs;
-        qy.setFromAxisAngle(_Y, syaw[i] + gyaw);
-        pos.set(wx, wy + bob, wz);
-        scl.set(sc, sc, sc);
-        bodyM.compose(pos, qy, scl);
-        sBody.setMatrixAt(n, bodyM);
-        // head: down grazing (with a chewing bob), slightly nodding when walking
-        const pitch = sgraze[i] * (0.95 + 0.1 * Math.sin(time * 5 + i * 1.7)) + (1 - sgraze[i]) * (0.12 + 0.06 * Math.sin(sphase[i] * 2));
-        sHead.setMatrixAt(n, part(0, 0.66, 0.36, pitch));
-        // legs: diagonal pairs swing while walking
-        const sw = Math.sin(sphase[i]) * 0.55 * walk;
-        sLeg.setMatrixAt(n * 4, part(0.14, 0.4, 0.24, sw));
-        sLeg.setMatrixAt(n * 4 + 1, part(-0.14, 0.4, 0.24, -sw));
-        sLeg.setMatrixAt(n * 4 + 2, part(0.14, 0.4, -0.24, -sw));
-        sLeg.setMatrixAt(n * 4 + 3, part(-0.14, 0.4, -0.24, sw));
-        // per-sheep tint follows the sheep (slot i), whatever instance index it lands on
-        const t = 0.93 + hash01(i + 1) * 0.1;
-        sBody.setColorAt(n, tint.setRGB(t, t * 0.99, t * (0.94 + hash01(i + 9) * 0.08)));
-        if (hash01(i + 40) < 0.18) sHead.setColorAt(n, tint.setRGB(1.3, 1.12, 1.0)); else sHead.setColorAt(n, tint.setRGB(1, 1, 1));
-        n++;
-      }
-    }
-    sBody.count = n; sHead.count = n; sLeg.count = n * 4;
-    sBody.instanceMatrix.needsUpdate = true;
-    sHead.instanceMatrix.needsUpdate = true;
-    sLeg.instanceMatrix.needsUpdate = true;
-    sBody.instanceColor.needsUpdate = true;
-    sHead.instanceColor.needsUpdate = true;
-  }
+  const LEGS4 = (x, y, z) => [[x, y, z], [-x, y, z], [x, y, -z], [-x, y, -z]];
+  const flocks = [
+    createFlock({
+      name: 'sheep', type: 'sheepfarm', per: SHEEP_PER_FARM, body: sheepBody, head: sheepHead, leg: sheepLeg,
+      headAt: [0, 0.66, 0.36], legs: LEGS4(0.14, 0.4, 0.24), speed: 0.55, sep: 0.6, scale: [0.92, 0.2],
+      swing: 0.55, graze: 0.95, stride: 9, bob: 0.025, rest: [2.5, 5],
+      tint: (i, c) => { const t = 0.93 + hash01(i + 1) * 0.1; return c.setRGB(t, t * 0.99, t * (0.94 + hash01(i + 9) * 0.08)); },
+      headTint: (i, c) => (hash01(i + 40) < 0.18 ? c.setRGB(1.3, 1.12, 1.0) : c.setRGB(1, 1, 1)),
+    }),
+    createFlock({
+      name: 'pig', type: 'pigsty', per: 5, body: pigBody, head: pigHead, leg: pigLeg,
+      headAt: [0, 0.46, 0.4], legs: LEGS4(0.14, 0.24, 0.26), speed: 0.45, sep: 0.7, scale: [0.88, 0.25],
+      swing: 0.6, graze: 0.7, stride: 11, bob: 0.02, rest: [2, 4],
+      tint: (i, c) => (hash01(i + 5) < 0.25 ? c.setRGB(0.62, 0.48, 0.42) : c.setRGB(1, 0.95 + hash01(i) * 0.05, 0.95)),
+    }),
+    createFlock({
+      name: 'cow', type: 'cattle', per: 4, body: cowBody, head: cowHead, leg: cowLeg,
+      headAt: [0, 0.98, 0.62], legs: LEGS4(0.2, 0.56, 0.42), speed: 0.4, sep: 1.2, scale: [0.9, 0.15],
+      swing: 0.45, graze: 1.0, stride: 6, bob: 0.02, rest: [3, 6],
+      tint: (i, c) => (hash01(i + 7) < 0.35 ? c.setRGB(0.72, 0.5, 0.34) : c.setRGB(1, 1, 1)),
+    }),
+    createFlock({
+      name: 'chicken', type: 'coop', per: 8, body: henBody, head: henHead, leg: henLeg,
+      headAt: [0, 0.29, 0.12], legs: [[0.05, 0.12, 0], [-0.05, 0.12, 0]], speed: 0.5, sep: 0.28, scale: [0.85, 0.3],
+      swing: 0.8, graze: 0.9, peck: 9, stride: 22, bob: 0.015, rest: [1, 3],
+      tint: (i, c) => (hash01(i + 11) < 0.4 ? c.setRGB(0.78, 0.5, 0.3) : c.setRGB(1, 1, 1)),
+    }),
+  ];
 
   // ---------------------------------------------------------------- deer
   const deerSlot = new Map();               // animal id -> slot
@@ -505,7 +637,7 @@ export function createAnimalsView(parent, terrain) {
     dt = Math.min(0.1, Math.max(0, dt || 0));
     time += dt;
     frame++;
-    updateSheep(state, dt, buildingGroups);
+    for (const f of flocks) f.update(state, dt, buildingGroups);
     updateDeer(state, dt);
   }
 

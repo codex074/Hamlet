@@ -100,6 +100,17 @@ export const BUILDINGS = {
                 workers: 1, job: 'forester', time: 6, unlockPop: 8, light: true },
   sheepfarm:  { name: 'คอกแกะ', category: 'resource', radius: 7, cost: { wood: 15, planks: 6 }, buildTime: 35,
                 workers: 2, job: 'ranch', outputs: [{ meat: 2 }, { wool: 2 }], time: 9, unlockPop: 15 },
+  // Livestock: workers carry feed (crops) from storage to the pen and bring back meat. `feed` lists what the
+  // animals accept (the most plentiful in storage is used), `feedPer` how much one round takes.
+  coop:       { name: 'เล้าไก่', category: 'resource', radius: 4, cost: { wood: 10 }, buildTime: 18,
+                workers: 1, job: 'livestock', feed: ['wheat', 'corn', 'beans'], feedPer: 1, output: { meat: 2 }, time: 8,
+                unlockPop: 14, light: true },
+  pigsty:     { name: 'คอกหมู', category: 'resource', radius: 5.5, cost: { wood: 14, planks: 4 }, buildTime: 25,
+                workers: 2, job: 'livestock', feed: ['corn', 'beans', 'berries'], feedPer: 2, output: { meat: 3 }, time: 10,
+                unlockPop: 18 },
+  cattle:     { name: 'คอกวัว', category: 'resource', radius: 7, cost: { wood: 18, planks: 8, stone: 4 }, buildTime: 35,
+                workers: 2, job: 'livestock', feed: ['wheat', 'corn', 'beans'], feedPer: 3, output: { meat: 5 }, time: 14,
+                unlockPop: 24 },
   ironmine:   { name: 'เหมืองแร่เหล็ก', category: 'resource', radius: 4.5, cost: { wood: 15, planks: 8 }, buildTime: 35,
                 workers: 2, job: 'gather', node: 'ore', output: { ore: 3 }, time: 10, unlockPop: 25, retired: true },
   weaver:     { name: 'ช่างทอผ้า', category: 'production', radius: 4, cost: { planks: 12, stone: 4 }, buildTime: 30,

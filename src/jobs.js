@@ -228,6 +228,37 @@ function planForester(state, v, b, cfg, rand) {
   planWait(v, null);
 }
 
+// ---------- livestock ----------
+
+// The feed this pen takes now: the accepted crop with the most in any storage (enough for one round), or null.
+export function feedFor(state, b) {
+  const cfg = BUILDINGS[b.type];
+  let best = null;
+  let most = 0;
+  for (const res of cfg.feed) {
+    let have = 0;
+    for (const s of state.buildings) if (BUILDINGS[s.type]?.storage && s.built) have += s.stock?.[res] ?? 0;
+    if (have >= cfg.feedPer && have > most) { best = res; most = have; }
+  }
+  return best;
+}
+
+// Carry feed from storage to the pen, tend the animals, take the meat to storage.
+function planLivestock(state, v, b, cfg) {
+  const feed = feedFor(state, b);
+  const src = feed && nearestStorageWith(state, b.x, b.z, feed, cfg.feedPer);
+  const dst = nearestStorage(state, b.x, b.z);
+  if (!src || !dst) return planWait(v, b);
+  v.queue.push(
+    gotoBuilding(src, v.x, v.z),
+    { kind: 'take', bId: src.id, res: feed, n: cfg.feedPer },
+    gotoBuilding(b, src.x, src.z),
+    { kind: 'produce', bId: b.id, t: workTime(b, cfg.time), in: { [feed]: cfg.feedPer }, out: { ...cfg.output } },
+    gotoBuilding(dst, b.x, b.z),
+    { kind: 'put', bId: dst.id },
+  );
+}
+
 // ---------- quarry ----------
 
 // Diggers work in the pit and carry the stone to the nearest storage. The pit never runs out.
@@ -284,7 +315,7 @@ function execDig(state, v, t, dt) {
 
 export const JOB_PLANNERS = {
   fish: planFish, ranch: planRanch, hunt: planHunt, doctor: planDoctor, market: planMarket,
-  forester: planForester, quarry: planQuarry,
+  forester: planForester, quarry: planQuarry, livestock: planLivestock,
 };
 
 // ---------- executors ----------

@@ -46,6 +46,13 @@ export function buildingProblem(state, b) {
       }
       break;
     }
+    case 'livestock': {
+      const has = cfg.feed.some((r) => storages(state).reduce((a, s) => a + (s.stock[r] ?? 0), 0) >= cfg.feedPer);
+      if (!has && !busyProducing(state, b)) {
+        return { code: 'no-input', text: `ขาดอาหารสัตว์: ${cfg.feed.map(resName).join(' / ')}`, blocking: true };
+      }
+      break;
+    }
     case 'fish': {
       if (Array.isArray(b.shore) && b.shore.length === 0) return { code: 'no-water', text: 'ไม่มีจุดตกปลาริมน้ำในระยะ', blocking: true };
       break;
