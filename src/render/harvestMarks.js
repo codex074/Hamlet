@@ -3,16 +3,16 @@
 import * as THREE from '../../vendor/three.module.js';
 import { heightAt } from '../terrain.js';
 
-const COLORS = { tree: 0xffb347, rock: 0x9fc3e8, ore: 0xe0795a };
-const RING_R = { tree: 1.1, rock: 1.5, ore: 1.6 };
+const COLORS = { tree: 0xff8a1a, rock: 0x4fb4ff, ore: 0xff4a3a };
+const RING_R = { tree: 1.3, rock: 1.6, ore: 1.7 };
 const START_CAP = 64;
 const CHECK_EVERY = 0.4;   // seconds between "did anything change?" checks
 
 export function createHarvestMarks(parent, terrain) {
-  const geo = new THREE.RingGeometry(0.78, 1, 20).rotateX(-Math.PI / 2);
+  const geo = new THREE.RingGeometry(0.66, 1, 24).rotateX(-Math.PI / 2);
+  // drawn over everything: in a dense forest the canopy would otherwise hide the marks
   const mat = new THREE.MeshBasicMaterial({
-    color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false,
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false, depthTest: false, toneMapped: false, fog: false,
   });
   mat.userData.noWeather = true;
   let cap = START_CAP;
@@ -27,7 +27,7 @@ export function createHarvestMarks(parent, terrain) {
     const m = new THREE.InstancedMesh(geo, mat, n);
     m.count = 0;
     m.frustumCulled = false;
-    m.renderOrder = 2;
+    m.renderOrder = 10;
     parent.add(m);
     return m;
   }
@@ -53,7 +53,7 @@ export function createHarvestMarks(parent, terrain) {
 
   function update(state, dt) {
     pulse += dt;
-    mat.opacity = 0.6 + 0.25 * Math.sin(pulse * 3);
+    mat.opacity = 0.75 + 0.2 * Math.sin(pulse * 3);
     timer -= dt;
     if (timer > 0) return;
     timer = CHECK_EVERY;

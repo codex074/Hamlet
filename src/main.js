@@ -228,6 +228,10 @@ function boot(session) {
       case 'Digit2': case 'Numpad2': setSpeed(2); break;
       case 'Digit3': case 'Numpad3': setSpeed(3); break;
       case 'KeyJ': hud.openWorkforce(); break;
+      case 'KeyH':   // photo mode: hide / show the whole interface
+        document.body.classList.toggle('photo-mode');
+        if (document.body.classList.contains('photo-mode')) hud.toast('📷 โหมดถ่ายภาพ — กด H เพื่อแสดงหน้าจอกลับมา');
+        break;
       default: break;
     }
   });

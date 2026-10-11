@@ -1163,3 +1163,8 @@ html, body, button { touch-action: manipulation; -webkit-tap-highlight-color: tr
 #info .mk.on { background: rgba(217, 164, 65, 0.22); border-color: var(--gold); color: var(--parch); }
 #info .mk:disabled { opacity: 0.4; cursor: not-allowed; }
 @media (hover: hover) { #info .mk:hover:not(:disabled) { border-color: var(--gold); } }
+
+/* photo mode (H): only the 3D view; the toast that announces it stays visible */
+body.photo-mode #topbar, body.photo-mode #speed, body.photo-mode #menu, body.photo-mode #info,
+body.photo-mode #events, body.photo-mode #buildbar, body.photo-mode #tooltip, body.photo-mode .savestatus,
+body.photo-mode .fps-counter, body.photo-mode #touchbar { display: none !important; }
