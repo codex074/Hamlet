@@ -8,6 +8,7 @@ import { normalizeSettings, worldDims, LEGACY_SETTINGS } from './settings.js';
 import { allOwnedTerritory } from './territory.js';
 import { countNodes } from './regrowth.js';
 import { pushEvent } from './events.js';
+import { ensureTutorial } from './tutorial.js';
 
 const SAVE_KEY = 'hamlet-save-v1';
 const SAVE_VERSION = 4;
@@ -140,6 +141,7 @@ export function deserialize(str) {
   else repairV4(state);
   migrateManualJobs(state);
   introduceWater(state);
+  ensureTutorial(state);   // villages from before the checklist skip it
   return state;
 }
 

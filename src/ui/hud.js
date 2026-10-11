@@ -8,6 +8,7 @@ import {
 } from '../config.js';
 import * as sim from '../sim.js';
 import { createWorkforceUI } from './workforce.js';
+import { createTutorialCard } from './tutorial.js';
 
 const { clock, isUnlocked } = sim;
 
@@ -481,6 +482,24 @@ export function createHUD(root, handlers = {}) {
   }
   renderTabs();
 
+  // Beginner checklist: opens the tab holding tool `id` and makes its button pulse for a few seconds.
+  function pointTo(id) {
+    const rec = toolButtons.find((r) => r.id === id);
+    if (!rec) return;
+    openTab = rec.tab;
+    renderTabs();
+    try { rec.btn.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); } catch (e) { /* old Safari */ }
+    rec.btn.classList.remove('pulse');
+    void rec.btn.offsetWidth;   // restart the animation
+    rec.btn.classList.add('pulse');
+    setTimeout(() => rec.btn.classList.remove('pulse'), 6000);
+  }
+
+  // Publish the top bar's height so the checklist card can sit right under it (the bar wraps on narrow screens).
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => document.documentElement.style.setProperty('--tb-h', `${Math.ceil(topbar.getBoundingClientRect().height)}px`)).observe(topbar);
+  }
+
   function setActiveTool(id) {
     activeToolId = id || null;
     for (const r of toolButtons) r.btn.classList.toggle('active', r.id === activeToolId);
@@ -530,6 +549,7 @@ export function createHUD(root, handlers = {}) {
     toast(`อัปเกรดอัตโนมัติทุกหลัง: ${on ? 'เปิด' : 'ปิด'}`);
   });
   addMenuItem('👥 จัดการงาน', () => openWorkforce());
+  addMenuItem('🎯 คำแนะนำเริ่มต้น', () => tutorial.reopen(lastState));
   addMenuItem('⚙️ ตั้งค่า', () => call('showSettings'));
   addMenuItem('💾 บันทึกเกม', () => { call('saveGame'); toast('บันทึกเกมแล้ว'); });
   const cloud = !!(handlers && handlers.cloud);
@@ -596,6 +616,9 @@ export function createHUD(root, handlers = {}) {
   function openWorkforce() {
     if (lastState) wf.openWorkforce();
   }
+  const tutorial = createTutorialCard({
+    root, call, toast: (t) => toast(t), pointTo: (id) => pointTo(id), openWorkforce: () => openWorkforce(),
+  });
 
   // body.info-open lets the CSS move the event log / FPS counter out of the way of the bottom sheet
   function setInfoOpen(open) { document.body.classList.toggle('info-open', !!open); }
@@ -1288,6 +1311,7 @@ export function createHUD(root, handlers = {}) {
       nums.jobs.chip.title = `ว่างงาน ${ws.free} · ช่างก่อสร้าง ${ws.builders} · ตำแหน่งว่าง ${ws.openSlots}${ws.sites ? ` · งานก่อสร้าง ${ws.sites}` : ''} — คลิกเพื่อจัดการงาน (J)`;
     }
     wf.refresh();
+    tutorial.render(state);
     setText(popSub, ` (ไร้บ้าน ${summary.homeless || 0})`);
     const sick = summary.sick != null ? summary.sick : ((state && state.villagers) || []).filter((v) => v.sick).length;
     sickEl.hidden = !(sick > 0);

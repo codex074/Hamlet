@@ -77,7 +77,9 @@ function seasonTargets(state) {
   const s = seasonOf(state);
   const p = s.progress;
   const autumn = s.key === 'autumn' ? Math.min(1, p * 6) : s.key === 'winter' ? Math.max(0, 1 - p * 3) : 0;
-  const dull = s.key === 'winter' ? Math.min(1, p * 3) * 0.75 : s.key === 'spring' ? Math.max(0, 1 - p * 4) * 0.75 : 0;
+  // spring fades out of the winter look — except the very first spring, which had no winter before it
+  const thaw = s.key === 'spring' && s.year > 1 ? Math.max(0, 1 - p * 4) * 0.75 : 0;
+  const dull = s.key === 'winter' ? Math.min(1, p * 3) * 0.75 : thaw;
   return { autumn, dull };
 }
 

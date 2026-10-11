@@ -1168,3 +1168,51 @@ html, body, button { touch-action: manipulation; -webkit-tap-highlight-color: tr
 body.photo-mode #topbar, body.photo-mode #speed, body.photo-mode #menu, body.photo-mode #info,
 body.photo-mode #events, body.photo-mode #buildbar, body.photo-mode #tooltip, body.photo-mode .savestatus,
 body.photo-mode .fps-counter, body.photo-mode #touchbar { display: none !important; }
+
+/* ---------- beginner checklist (top-left, under the top bar) ---------- */
+#tutorial {
+  position: fixed;
+  left: var(--edge-l);
+  top: calc(var(--edge-t) + var(--tb-h, 34px) + 8px);
+  width: 300px;
+  max-width: calc(100vw - var(--edge-l) - var(--edge-r));
+  max-height: calc(100dvh - var(--edge-t) - var(--tb-h, 34px) - var(--bb-h) - 40px);
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  z-index: 12;
+  font-size: 13px;
+  line-height: 1.45;
+}
+#tutorial.folded { padding-bottom: 8px; }
+#tutorial .tut-head { display: flex; align-items: center; gap: 6px; }
+#tutorial .tut-title { font-weight: 700; color: var(--gold); font-size: 14px; flex: 1; }
+#tutorial .tut-count { font-variant-numeric: tabular-nums; color: var(--parch-dim); }
+#tutorial .tut-ic { width: 26px; height: 26px; border-radius: 6px; background: rgba(243, 230, 200, 0.08); border: 1px solid var(--gold-soft); color: var(--parch-dim); }
+@media (hover: hover) { #tutorial .tut-ic:hover { color: var(--parch); border-color: var(--gold); } }
+#tutorial .tut-bar { height: 5px; margin: 7px 0 6px; background: rgba(0, 0, 0, 0.4); border-radius: 3px; overflow: hidden; }
+#tutorial .tut-bar i { display: block; height: 100%; background: var(--good); transition: width 0.5s ease; }
+#tutorial .tut-steps { list-style: none; margin: 0; padding: 0; }
+#tutorial .tut-steps li { display: grid; grid-template-columns: 22px 1fr; column-gap: 4px; padding: 3px 0; }
+#tutorial .tut-steps li.done .tut-t { color: var(--parch-dim); text-decoration: line-through; text-decoration-color: rgba(243, 230, 200, 0.35); }
+#tutorial .tut-steps li.todo { color: var(--parch-dim); opacity: 0.75; }
+#tutorial .tut-steps li.cur { margin: 4px 0; padding: 7px 8px 8px 4px; background: rgba(217, 164, 65, 0.14); border: 1px solid var(--gold-soft); border-radius: 8px; }
+#tutorial .tut-steps li.cur .tut-t { font-weight: 700; color: var(--parch); }
+#tutorial .tut-text, #tutorial .tut-steps li.cur .btn { grid-column: 2; }
+#tutorial .tut-text { color: var(--parch-dim); margin: 3px 0 6px; }
+#tutorial .tut-steps li.cur .btn { justify-self: start; }
+#tutorial .tut-fold { color: var(--parch); }
+#tutorial .tut-confirm, #tutorial .tut-done { display: flex; flex-direction: column; gap: 6px; }
+#tutorial .tut-confirm label { color: var(--parch-dim); display: flex; gap: 6px; align-items: center; }
+#tutorial .tut-row { display: flex; gap: 6px; justify-content: flex-end; }
+#tutorial .dim { color: var(--parch-dim); }
+/* a build-bar button the checklist points at */
+.bbtn.pulse { animation: tut-pulse 1s ease-in-out 6; border-color: var(--gold) !important; }
+@keyframes tut-pulse { 50% { box-shadow: 0 0 0 4px rgba(240, 184, 74, 0.6); background: rgba(217, 164, 65, 0.35); } }
+@media (prefers-reduced-motion: reduce) { .bbtn.pulse { animation: none; box-shadow: 0 0 0 3px rgba(240, 184, 74, 0.6); } }
+@media (max-width: 700px) { #tutorial { width: min(280px, calc(100vw - 16px)); font-size: 12px; } }
+body.info-open #tutorial { z-index: 11; }
+body.photo-mode #tutorial { display: none !important; }
