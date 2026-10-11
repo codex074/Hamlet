@@ -4,6 +4,7 @@ import { createScene } from './render/scene.js';
 import { createCameraController } from './render/camera.js';
 import { createTerrainMesh } from './render/terrainMesh.js';
 import { createWorldView } from './render/world.js';
+import { createWeatherView } from './render/weather.js';
 import * as sim from './sim.js';
 import { saveGame, loadGame, clearSave, deserialize } from './save.js';
 import { startSession } from './net/session.js';
@@ -103,6 +104,7 @@ function boot(session) {
   scene.add(terrainView.mesh);
   if (terrainView.water) scene.add(terrainView.water);
   const worldView = createWorldView(scene, state.terrain);
+  const weatherView = createWeatherView(sceneApi, state.terrain);
 
   const terrainHeight = (x, z) => heightAt(state.terrain, x, z);
   const cameraController = createCameraController(camera, canvas, terrainHeight);
@@ -335,6 +337,7 @@ function boot(session) {
       terrainView.updateWear(state.wear, state.zones);
     }
 
+    weatherView.update(state, realDt);
     const c = sim.clock(state);
     sceneApi.setTimeOfDay(c.hour + c.minute / 60);
     worldView.setNight(c.isNight);

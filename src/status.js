@@ -7,6 +7,7 @@ import { difficultyOf } from './settings.js';
 import { distance, storages, nearestStorageWithAll } from './economy.js';
 import { isOwned } from './territory.js';
 import { pushEvent } from './events.js';
+import { seasonEffects } from './seasons.js';
 
 const HOUR = DAY_LENGTH / 24;
 const WALKING_SHARE = 1.1;
@@ -130,7 +131,8 @@ export function recordFood(state, res, n, eaten = false) {
 // Meals the whole village needs per game day (each villager eats when hunger reaches HUNGRY_AT).
 export function foodDemandPerDay(state) {
   // ×WALKING_SHARE: walking adds hunger (WALK_HUNGER_PER_M), about a tenth on a typical day
-  const mealsEach = (DAY_LENGTH * HUNGER_PER_SEC * WALKING_SHARE * (difficultyOf(state)?.hunger ?? 1)) / HUNGRY_AT;
+  const mealsEach = (DAY_LENGTH * HUNGER_PER_SEC * WALKING_SHARE * seasonEffects(state).hunger
+    * (difficultyOf(state)?.hunger ?? 1)) / HUNGRY_AT;
   return Math.round(state.villagers.length * mealsEach);
 }
 

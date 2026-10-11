@@ -685,7 +685,10 @@ export function buildCarry(res) {
 
 let previewMat = null;
 export function characterMaterial() {
-  if (!previewMat) previewMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  if (!previewMat) {
+    previewMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    previewMat.userData.noWeather = true;   // villagers do not turn white in the snow
+  }
   return previewMat;
 }
 

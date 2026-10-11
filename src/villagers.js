@@ -3,10 +3,11 @@ import {
   HUNGER_PER_SEC, HUNGRY_AT, STARVING_AT, CARRY_MAX, GATHER_RADIUS, FIELD_RADIUS, IDLE_WANDER_RADIUS,
   BUILDINGS, CATHEDRAL_STAGES, FOODS, UPGRADE_BUILD_TIME, DAY_LENGTH, CHILD_PLAY_RADIUS,
   DEATH_AGE_MIN, DEATH_AGE_MAX, THIRST_PER_SEC, THIRSTY_AT, PARCHED_AT, SLEEP_THIRST_MUL, WALK_THIRST_PER_M,
-  WALK_HUNGER_PER_M, CARRY_EXERTION_MUL, DRINK_TIME, WAGE_PER_TASK,
+  WALK_HUNGER_PER_M, CARRY_EXERTION_MUL, DRINK_TIME, WAGE_PER_TASK, THIRST_URGENT,
 } from './config.js';
 import { nearestFoodSource, buyMeal } from './market.js';
 import { nearestWater } from './water.js';
+import { seasonEffects } from './seasons.js';
 import { recordFood } from './status.js';
 import { mulberry32, randRange } from './rng.js';
 import { pickGivenName, pickSurname, fullName } from './names.js';
@@ -202,7 +203,8 @@ function planFarm(state, v, b, cfg, rand) {
   const ang = rand() * Math.PI * 2;
   const px = zone.x + Math.cos(ang) * rad;
   const pz = zone.z + Math.sin(ang) * rad;
-  const wheat = Math.min(CARRY_MAX, Math.round(cfg.output.wheat * (0.5 + fertilityAt(state.terrain, px, pz))));
+  const grow = seasonEffects(state).farm;   // winter fields barely yield
+  const wheat = Math.max(1, Math.min(CARRY_MAX, Math.round(cfg.output.wheat * grow * (0.5 + fertilityAt(state.terrain, px, pz)))));
   v.queue.push(
     gotoPoint(px, pz),
     { kind: 'produce', bId: b.id, t: workTime(b, cfg.time), out: { wheat } },
@@ -484,15 +486,17 @@ const PAID_TASKS = new Set(['gather', 'produce', 'hunt', 'plant', 'heal', 'staff
 
 export function stepVillager(state, v, dt, rand) {
   const diff = difficultyOf(state).hunger;
+  const season = seasonEffects(state);
   v.age = (v.age ?? 30) + dt / DAY_LENGTH;
-  v.hunger = Math.min(1, v.hunger + HUNGER_PER_SEC * diff * dt);
+  v.hunger = Math.min(1, v.hunger + HUNGER_PER_SEC * diff * season.hunger * dt);
   const sleepMul = v.role === 'sleeping' ? SLEEP_THIRST_MUL : 1;
-  v.thirst = Math.min(1, (v.thirst ?? 0) + THIRST_PER_SEC * diff * sleepMul * dt);
+  v.thirst = Math.min(1, (v.thirst ?? 0) + THIRST_PER_SEC * diff * season.thirst * sleepMul * dt);
   if (v.hunger >= STARVING_AT || v.thirst >= PARCHED_AT) {
     const home = getBuilding(state, v.homeId);
     if (home && v.hunger >= STARVING_AT) home.starvedToday = true;
     if (home && v.thirst >= PARCHED_AT) home.parchedToday = true;
   }
+  if (v.thirst >= THIRST_URGENT && v.role !== 'sleeping') drinkNow(state, v);
   if (v.queue.length === 0) planNext(state, v, rand);
   const task = v.queue[0];
   if (!task) return;
@@ -505,6 +509,22 @@ export function stepVillager(state, v, dt, rand) {
     v.queue.shift();
     if (PAID_TASKS.has(task.kind)) v.coins = (v.coins ?? 0) + WAGE_PER_TASK;
   } else if (result === FAIL) failVillager(state, v);
+}
+
+// Nearly parched: go and drink now. Empty-handed villagers drop the errand; one carrying a load makes a
+// detour to the nearest water and then carries on with the delivery.
+function drinkNow(state, v) {
+  if (v.queue.some((t) => t.kind === 'drink')) return;
+  const w = nearestWater(state, v.x, v.z);
+  if (!w) return;
+  const go = w.b ? gotoBuilding(w.b, v.x, v.z) : gotoPoint(w.x, w.z);
+  if (v.carry) {
+    v.queue.unshift(go, { kind: 'drink', t: DRINK_TIME });
+    return;
+  }
+  failVillager(state, v);
+  v.queue.push(go, { kind: 'drink', t: DRINK_TIME });
+  v.role = 'idle';
 }
 
 // Walking makes villagers hungry and thirsty sooner (more so under a load).

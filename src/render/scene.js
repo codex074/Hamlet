@@ -226,6 +226,20 @@ export function createScene(canvas) {
     placeSun();
   }
 
+  // Bad weather greys the sky, dims the sun and pulls the fog in; snow on the ground brightens the bounce light.
+  let overcast = 0;
+  let groundSnow = 0;
+  const GREY = new THREE.Color();
+  function greyOut(c, amt) {
+    const l = c.r * 0.3 + c.g * 0.55 + c.b * 0.15;
+    GREY.setRGB(l * 0.92, l * 0.95, l * 1.0);
+    c.lerp(GREY, amt);
+  }
+  function setOvercast(amount, snow = 0) {
+    overcast = clamp01(amount);
+    groundSnow = clamp01(snow);
+  }
+
   function setTimeOfDay(hour) {
     const h = ((hour % 24) + 24) % 24;
     let e; // sun elevation, positive by day, negative at night (the "sun" light becomes the moon)
@@ -259,6 +273,19 @@ export function createScene(canvas) {
     sampleColor(HEMI_SKY, e, hemi.color);
     sampleColor(HEMI_GROUND, e, hemi.groundColor);
     hemi.intensity = sampleNumber(HEMI_INTENSITY, e);
+    if (overcast > 0.001) {
+      const g = overcast * 0.85;
+      greyOut(scene.background, g);
+      greyOut(scene.fog.color, g);
+      greyOut(u.uHorizon.value, g);
+      greyOut(u.uZenith.value, g);
+      u.uGlow.value *= 1 - overcast * 0.8;
+      sun.intensity *= 1 - overcast * 0.6;
+      hemi.intensity *= 1 + overcast * 0.08;
+      scene.fog.near *= 1 - overcast * 0.55;
+      scene.fog.far *= 1 - overcast * 0.4;
+    }
+    if (groundSnow > 0.001) hemi.groundColor.lerp(GREY.setRGB(0.85, 0.88, 0.95), groundSnow * 0.6);
     placeSun();
   }
 
@@ -286,5 +313,5 @@ export function createScene(canvas) {
 
   function dispose() { offGraphics(); }
 
-  return { renderer, scene, camera, sun, hemi, resize, setTimeOfDay, sunFollow, dispose };
+  return { renderer, scene, camera, sun, hemi, resize, setTimeOfDay, setOvercast, sunFollow, dispose };
 }

@@ -186,7 +186,7 @@ test('hunter kills a deer and brings meat to storage', () => {
   assert.equal(s.animals[0].reserved, b.workers[0], 'deer reserved');
   tick(s, 60);
   assert.equal(s.animals.length, 0, 'deer removed');
-  assert.equal(townhall(s).stock.meat, 3);
+  assert.equal(townhall(s).stock.meat, BUILDINGS.hunter.output.meat);
 });
 
 test('herbalist brings herbs without using up trees', () => {

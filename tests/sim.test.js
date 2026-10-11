@@ -254,7 +254,8 @@ test('summary fields', () => {
   const sum = summary(s);
   assert.deepEqual(Object.keys(sum).sort(),
     ['adults', 'births', 'children', 'day', 'deaths', 'difficulty', 'elders', 'food', 'gold', 'happiness', 'homeless', 'hour',
-      'housing', 'isNight', 'ownedPlots', 'pop', 'pregnant', 'sick', 'stock', 'totalPlots', 'unemployed', 'workforce']);
+      'housing', 'isNight', 'ownedPlots', 'pop', 'pregnant', 'season', 'sick', 'snow', 'stock', 'totalPlots', 'unemployed',
+      'weather', 'workforce']);
   assert.deepEqual([sum.adults, sum.children, sum.elders, sum.pregnant, sum.births, sum.deaths], [8, 0, 0, 0, 0, 0]);
   assert.equal(sum.pop, 8);
   assert.equal(sum.homeless, 8);

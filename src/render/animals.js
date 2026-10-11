@@ -201,6 +201,7 @@ export function createAnimalsView(parent, terrain) {
   parent.add(root);
 
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  mat.userData.noWeather = true;   // no snow caps on the deer
   const geos = [];
   const meshes = [];
   function mk(name, geo, cap) {

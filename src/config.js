@@ -64,7 +64,7 @@ export const BUILDINGS = {
   woodcutter: { name: 'คนตัดไม้', category: 'resource', radius: 3.5, cost: { wood: 8 }, buildTime: 15,
                 workers: 2, job: 'gather', node: 'tree', output: { wood: 2 }, time: 6, unlockPop: 0 },
   forager:    { name: 'คนเก็บของป่า', category: 'resource', radius: 3.5, cost: { wood: 8 }, buildTime: 15,
-                workers: 2, job: 'gather', node: 'berry', output: { berries: 2 }, time: 5, unlockPop: 0, light: true },
+                workers: 4, job: 'gather', node: 'berry', output: { berries: 2 }, time: 6, unlockPop: 0, light: true },
   quarry:     { name: 'เหมืองหิน', category: 'resource', radius: 4, cost: { wood: 12 }, buildTime: 20,
                 workers: 2, job: 'gather', node: 'rock', output: { stone: 2 }, time: 8, unlockPop: 0 },
   sawmill:    { name: 'โรงเลื่อย', category: 'production', radius: 4.5, cost: { wood: 15, stone: 6 }, buildTime: 30,
@@ -80,9 +80,9 @@ export const BUILDINGS = {
   tavern:     { name: 'โรงเตี๊ยม', category: 'service', radius: 5, cost: { planks: 15, stone: 8 }, buildTime: 40,
                 workers: 1, job: 'service', service: 'entertainment', serviceRadius: 45, unlockPop: 20, light: true },
   fishery:    { name: 'ท่าประมง', category: 'resource', radius: 4, cost: { wood: 10 }, buildTime: 20,
-                workers: 2, job: 'fish', output: { fish: 2 }, time: 10, unlockPop: 10, nearWater: true },
+                workers: 2, job: 'fish', output: { fish: 3 }, time: 10, unlockPop: 10, nearWater: true },
   hunter:     { name: 'กระท่อมนักล่า', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
-                workers: 1, job: 'hunt', output: { meat: 3 }, time: 4, unlockPop: 8 },
+                workers: 1, job: 'hunt', output: { meat: 4 }, time: 4, unlockPop: 8 },
   herbalist:  { name: 'คนเก็บสมุนไพร', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
                 workers: 1, job: 'gather', node: 'tree', keepNode: true, output: { herbs: 1 }, time: 7, unlockPop: 10, light: true },
   forester:   { name: 'คนปลูกป่า', category: 'resource', radius: 3.5, cost: { wood: 10 }, buildTime: 15,
@@ -158,7 +158,8 @@ export const START = {
 // hungry sooner, so far-away work costs food and water. Sources: wells, the townhall and markets
 // (all `water: true`) and the shore of any river or lake inside the territory.
 export const THIRST_PER_SEC = 1 / 100;
-export const THIRSTY_AT = 0.6;
+export const THIRSTY_AT = 0.5;
+export const THIRST_URGENT = 0.8;           // drop the current errand (unless carrying) to go and drink
 export const PARCHED_AT = 0.9;              // like STARVING_AT: the house's water need fails that day
 export const SLEEP_THIRST_MUL = 0.25;       // thirst rises slowly while asleep
 export const WALK_THIRST_PER_M = 0.001;     // extra thirst per metre walked
@@ -167,6 +168,20 @@ export const CARRY_EXERTION_MUL = 1.5;      // walking with a load
 export const DRINK_TIME = 2;                // seconds spent drinking
 export const WATER_RADIUS = BUILDINGS.well.waterRadius;   // a house needs a well (or townhall / market) this close
 export const PARCHED_SPEED_MUL = 0.8;
+
+// Seasons & weather. A year is 4 seasons of SEASON_DAYS days; each half-day rolls its weather from the seed.
+// Multipliers apply to farm output, berry regrowth, hunger, thirst and sickness; spring is neutral.
+export const SEASON_DAYS = 6;
+export const SEASONS = [
+  { key: 'spring', name: 'ใบไม้ผลิ', icon: '🌸', farm: 1, berry: 1, hunger: 1, thirst: 1, sick: 1, wet: 0.35, precip: 'rain' },
+  { key: 'summer', name: 'ฤดูร้อน', icon: '☀️', farm: 1.15, berry: 1.2, hunger: 1, thirst: 1.25, sick: 1, wet: 0.15, precip: 'rain' },
+  { key: 'autumn', name: 'ใบไม้ร่วง', icon: '🍂', farm: 1.1, berry: 0.8, hunger: 1.05, thirst: 1, sick: 1.2, wet: 0.4, precip: 'rain' },
+  { key: 'winter', name: 'ฤดูหนาว', icon: '❄️', farm: 0.5, berry: 0.25, hunger: 1.1, thirst: 0.9, sick: 1.4, wet: 0.55, precip: 'snow' },
+];
+export const RAIN_THIRST_MUL = 0.8;         // villagers get thirsty slower while it rains
+export const SNOW_FALL_PER_SEC = 1 / 240;   // ground snow cover (0..1) gained per second of snowfall
+export const SNOW_MELT_PER_SEC = 1 / 300;   // ...lost per second when not snowing (faster outside winter)
+export const SNOW_SPEED_MUL = 0.8;          // walking speed on full snow cover
 
 // Sickness
 export const SICK_CHANCE_PER_DAY = 0.04;    // base chance per villager per midnight
@@ -197,7 +212,7 @@ export const NEAR_WATER_DIST = 12;           // fishery must have water within r
 export const HUNT_RADIUS = 60;
 export const HUNT_SHOT_DIST = 6;
 export const DEER_COUNT = 24;
-export const DEER_RESPAWN_SEC = 90;
+export const DEER_RESPAWN_SEC = 60;
 export const DEER_SPEED = 1.4;
 export const UPGRADE_BUILD_TIME = 8;
 

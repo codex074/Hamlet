@@ -4,6 +4,7 @@ import {
   BUILDINGS, RESOURCES, RESOURCE_INFO, HOUSE_LEVELS, NEED_INFO, CATHEDRAL_STAGES,
   ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS, FISH_RADIUS, HUNT_RADIUS, FOODS, SUPPLY_MAX, TOOL_SPEED_BONUS,
   SICK_LEAVE_DAYS, DAY_LENGTH, WATER_RADIUS, THIRSTY_AT, HUNGRY_AT, MARKET_SLOTS, MARKET_TREASURY_SHARE,
+  SEASON_DAYS, RAIN_THIRST_MUL, SNOW_SPEED_MUL,
 } from '../config.js';
 import * as sim from '../sim.js';
 import { createWorkforceUI } from './workforce.js';
@@ -115,6 +116,23 @@ function jobLine(type) {
     parts.push(`บริการ${SERVICE_NAME[d.service] || ''} รัศมี ${d.serviceRadius} ม. · ใช้${info(d.supply).name}`);
   }
   return parts.join(' · ');
+}
+
+// Tooltip for the season chip: what this season and today's weather change.
+function seasonTip(se, w, snow) {
+  const pct = (m) => `${m >= 1 ? '+' : ''}${Math.round((m - 1) * 100)}%`;
+  const lines = [`${se.icon} ${se.name} วันที่ ${se.day}/${SEASON_DAYS}${se.year > 1 ? ` · ปีที่ ${se.year}` : ''}`];
+  const fx = [];
+  if (se.farm !== 1) fx.push(`ผลผลิตไร่นา ${pct(se.farm)}`);
+  if (se.berry !== 1) fx.push(`เบอร์รี่งอก ${pct(se.berry)}`);
+  if (se.hunger !== 1) fx.push(`หิวเร็ว ${pct(se.hunger)}`);
+  if (se.thirst !== 1) fx.push(`กระหายน้ำ ${pct(se.thirst)}`);
+  if (se.sick !== 1) fx.push(`โอกาสป่วย ${pct(se.sick)}`);
+  lines.push(fx.length ? fx.join(' · ') : 'ไม่มีผลพิเศษ');
+  if (w.kind === 'rain') lines.push(`🌧️ ฝนตก — กระหายน้ำช้าลง ${Math.round((1 - RAIN_THIRST_MUL) * 100)}%`);
+  if (w.kind === 'snow') lines.push('🌨️ หิมะตก — หิมะสะสมบนพื้น');
+  if (snow > 0.05) lines.push(`หิมะบนพื้น ${Math.round(snow * 100)}% — เดินช้าลงสูงสุด ${Math.round((1 - SNOW_SPEED_MUL) * 100)}%`);
+  return lines.join('\n');
 }
 
 function happyFace(h) {
@@ -246,6 +264,7 @@ export function createHUD(root, handlers = {}) {
   terrChip.chip.style.cursor = 'pointer';
   terrChip.chip.addEventListener('click', () => toggleTool({ kind: 'territory' }, 'territory'));
   addChip('clock', '☀️', 'เวลา', 'clock');
+  addChip('season', '🌸', 'ฤดูกาลและสภาพอากาศ', 'season');
 
   // ===== tooltip =====
   function showTip(html, anchor) {
@@ -1258,6 +1277,14 @@ export function createHUD(root, handlers = {}) {
     const c = clock(state);
     setText(nums.clock.ic, c.isNight ? '🌙' : '☀️');
     setText(nums.clock.num, `วันที่ ${c.day} · ${pad2(c.hour)}:${pad2(c.minute)}`);
+    const se = summary.season;
+    if (se) {
+      const w = summary.weather || { kind: 'clear' };
+      const wIcon = w.kind === 'rain' ? ' 🌧️' : w.kind === 'snow' ? ' 🌨️' : '';
+      setText(nums.season.ic, se.icon);
+      setText(nums.season.num, `${se.name} ${se.day}/${SEASON_DAYS}${wIcon}`);
+      nums.season.chip.title = seasonTip(se, w, summary.snow || 0);
+    }
 
     const hasTerr = typeof sim.plotInfo === 'function' && !!state.territory;
     terrTab.hidden = !hasTerr;

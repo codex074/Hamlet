@@ -574,6 +574,7 @@ test('nightly immigration still brings the usual headcount, families included', 
   for (let i = 0; i < 12; i++) {
     const s = emptyWorld();
     house(s, 100, 100, [person(s), person(s), person(s)]);
+    townhall(s).stock.berries = 600;   // plenty of food: growth is not capped by it
     const pop = s.villagers.length;
     processMidnight(s, mulberry32(i));
     const arrivals = s.villagers.filter((v) => v.homeId == null);

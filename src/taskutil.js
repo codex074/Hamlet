@@ -2,6 +2,7 @@
 import {
   WALK_SPEED, WATER_SPEED_MUL, WEAR_PER_STEP, SICK_SPEED_MUL, BUILDINGS, TOOL_SPEED_BONUS,
   CHILD_AGE, ELDER_AGE, ELDER_SPEED_MUL, CHILD_SPEED_MUL, PREGNANT_SPEED_MUL, PARCHED_AT, PARCHED_SPEED_MUL,
+  SNOW_SPEED_MUL,
 } from './config.js';
 import { addWear, speedMultiplier } from './wear.js';
 import { isWater } from './terrain.js';
@@ -101,7 +102,8 @@ export function moveToward(state, v, tx, tz, dt, stop = ARRIVE_DIST) {
   if (d <= stop) return true;
   const water = isWater(state.terrain, v.x, v.z) ? WATER_SPEED_MUL : 1;
   const sick = v.sick ? SICK_SPEED_MUL : 1;
-  const speed = WALK_SPEED * speedMultiplier(state.wear, v.x, v.z) * water * sick * ageSpeedMul(v);
+  const snow = 1 - (1 - SNOW_SPEED_MUL) * (state.snow ?? 0);   // deep snow slows everyone down
+  const speed = WALK_SPEED * speedMultiplier(state.wear, v.x, v.z) * water * sick * snow * ageSpeedMul(v);
   const move = Math.min(speed * dt, d);
   v.x += (dx / d) * move;
   v.z += (dz / d) * move;

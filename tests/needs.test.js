@@ -136,6 +136,7 @@ test('processMidnight starts an upgrade when all next-level needs are met', () =
 test('processMidnight: happy village attracts immigrants at the map edge', () => {
   const s = emptyWorld();
   addHouse(s, 100, 100, 3, 1);
+  townhall(s).stock.berries = 600;   // plenty of food: growth is not capped by it
   const pop = s.villagers.length;
   processMidnight(s, mulberry32(7));
   assert.equal(s.villagers.length, pop + 6);   // 2 + floor(1 * 4)
@@ -158,6 +159,7 @@ test('immigration stops with too many homeless; none when unhappy or no food', (
   processMidnight(s, mulberry32(1));
   assert.equal(s.villagers.length, 7);          // 7 homeless > 6
   clearVillagers(s);
+  townhall(s).stock.berries = 600;
   processMidnight(s, mulberry32(1));
   assert.equal(s.villagers.length, 4);          // no houses, food -> 0.6 -> 2 + 2
 });
@@ -290,4 +292,16 @@ test('a parched resident fails the house water need until midnight', async () =>
   assert.equal(h.needsMet.water, false);
   processMidnight(s, mulberry32(1));
   assert.equal(h.parchedToday, false);
+});
+
+test('immigration follows food: none when production falls short and the reserve is low, fewer when tight', () => {
+  const s = emptyWorld();
+  addHouse(s, 100, 100, 3, 1);
+  townhall(s).stock.berries = 5;            // less than a day of food, nothing produced
+  processMidnight(s, mulberry32(7));
+  assert.equal(s.villagers.length, 3);
+  assert.ok(s.events.some((e) => /ไม่มีใครย้ายเข้ามา — ผลิตอาหารได้/.test(e.text)));
+  townhall(s).stock.berries = 40;           // a reserve but no production: just one newcomer
+  processMidnight(s, mulberry32(8));
+  assert.equal(s.villagers.length, 4);
 });

@@ -4,6 +4,7 @@ import {
 } from './config.js';
 import { difficultyOf } from './settings.js';
 import { pushEvent } from './events.js';
+import { seasonEffects } from './seasons.js';
 import { fullName } from './names.js';
 import { failVillager, removeVillager } from './villagers.js';
 
@@ -33,6 +34,7 @@ function sickChance(state, v) {
   let p = SICK_CHANCE_PER_DAY * difficultyOf(state).sickness;
   if (home?.starvedToday) p *= SICK_HUNGRY_MUL;
   if (home?.parchedToday) p *= SICK_THIRSTY_MUL;
+  p *= seasonEffects(state).sick;   // colds in autumn and winter
   if (home?.needsMet?.health) p *= SICK_COVERED_MUL;
   return p;
 }

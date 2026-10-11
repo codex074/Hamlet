@@ -521,6 +521,7 @@ test('difficulty scales immigration count and tax', () => {
     clearVillagers(s);
     setDifficulty(s, level);
     addHouse(s, 100, 100, 3, 1);
+    townhall(s).stock.berries = 600;   // plenty of food: growth is not capped by it
     const gold0 = s.gold;
     processMidnight(s, mulberry32(7));
     return { arrived: s.villagers.length - 3, income: Math.round((s.gold - gold0) * 100) / 100 };

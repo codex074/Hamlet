@@ -29,6 +29,7 @@ import {
   createStartingVillagers, processDeaths, villagerAt, villagerInfo, household, populationCounts,
 } from './families.js';
 import { updateBuildingStatus, foodSummary } from './status.js';
+import { seasonOf, weatherAt, seasonEffects, updateSnow, seasonChangeText } from './seasons.js';
 import {
   ensureMarket, setMarketGoods, MARKET_GOODS, DEFAULT_MARKET_GOODS, priceOf, stockMaxOf,
 } from './market.js';
@@ -41,6 +42,7 @@ export {
   clock, serviceCovered, upgradeStatus, requestUpgrade, setAutoUpgrade, villagerAt, villagerInfo, household,
   normalizeSettings, DEFAULT_SETTINGS, SETTINGS_OPTIONS, spawnOf, plotInfo, plotPrice, buyPlot, isOwned,
   assignJob, jobChoices, jobCandidates, workforceSummary, workplaceName, waitingReason, jobTitleOf,
+  seasonOf, weatherAt, seasonEffects,
   BUILDER, JOB_TITLE, BUILDER_TITLE, ensureMarket, setMarketGoods, MARKET_GOODS, DEFAULT_MARKET_GOODS, priceOf,
   stockMaxOf,
 };
@@ -168,6 +170,7 @@ export function summary(state) {
     ...populationCounts(state), births: state.births ?? 0, deaths: state.deaths ?? 0,
     ownedPlots: ownedPlotCount(state), totalPlots: (state.world?.plots ?? 0) ** 2,
     difficulty: state.difficulty ?? 'normal',
+    season: seasonOf(state), weather: weatherAt(state), snow: state.snow ?? 0,
   };
 }
 
@@ -323,9 +326,13 @@ function updateConstruction(state) {
 // Once per game second: berries regrow, saplings may become trees, paths fade.
 function slowTick(state, dt) {
   const max = nodeAmountFor(state.settings, 'berry');
-  for (const n of state.nodes) {
-    if (n.kind === 'berry' && n.amount < max) n.amount = Math.min(max, n.amount + BERRY_REGROW_PER_SEC * dt);
+  const regrow = BERRY_REGROW_PER_SEC * seasonEffects(state).berry * dt;   // no regrowth in winter
+  if (regrow > 0) {
+    for (const n of state.nodes) {
+      if (n.kind === 'berry' && n.amount < max) n.amount = Math.min(max, n.amount + regrow);
+    }
   }
+  updateSnow(state, dt);
   growSaplings(state);
   decayWear(state.wear, dt);
 }
@@ -354,6 +361,8 @@ function stepWorld(state, dt) {
   const day = clock(state).day;
   if (day > state.lastDay) {
     processMidnight(state, rand);
+    const news = seasonChangeText(state);
+    if (news) pushEvent(state, news, { kind: 'info' });
     processRegrowth(state, mulberry32(((state.seed * 1597334677) ^ Math.floor(state.time)) >>> 0));
     state.lastDay = day;
   }

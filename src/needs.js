@@ -294,7 +294,18 @@ function immigrate(state, hs, rand) {
     pushEvent(state, 'ไม่มีใครอยากย้ายเข้ามา เพราะหมู่บ้านไม่มีอาหาร');
     return;
   }
-  const count = Math.max(1, Math.round((2 + Math.floor(avg * 4)) * difficultyOf(state).immigration));
+  let count = Math.max(1, Math.round((2 + Math.floor(avg * 4)) * difficultyOf(state).immigration));
+  // growth follows food: newcomers only as fast as production (plus a share of the reserve) can feed them
+  const f = foodSummary(state, totalStock(state));
+  const eachPerDay = f.demandPerDay / Math.max(1, state.villagers.length);
+  if (f.net < 0 && f.stock < f.demandPerDay) {
+    pushEvent(state, `ไม่มีใครย้ายเข้ามา — ผลิตอาหารได้ ${f.inPerDay}/วัน แต่ต้องการ ${f.demandPerDay}/วัน`, {
+      kind: 'warn', detail: 'สร้างคนเก็บของป่า ท่าประมง ฟาร์ม หรือนักล่าเพิ่ม และมอบหมายคนงานให้ครบ หมู่บ้านจึงจะโตต่อได้',
+    });
+    return;
+  }
+  const spare = f.net + f.stock / 3;   // a third of the reserve may feed newcomers
+  count = Math.max(1, Math.min(count, Math.floor(spare / Math.max(1, eachPerDay))));
   const p = edgeSpawn(state, rand);
   let arrived = 0;
   while (arrived < count) {
