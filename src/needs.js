@@ -122,6 +122,7 @@ export function newBuilding(state, type, x, z, rot) {
   } else {
     b.tooled = false;
     if (cfg.job === 'ranch') b.cycle = 0;
+    if (cfg.job === 'forester') b.planting = false;   // starts when the player presses "plant"
   }
   return b;
 }

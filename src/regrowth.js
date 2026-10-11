@@ -1,9 +1,10 @@
-// Saplings growing into trees, and natural regrowth of trees, rocks and ore at midnight.
+// Saplings growing into trees, and natural regrowth of trees, berry bushes, rocks and ore at midnight.
 // Pure: no DOM, no globals.
 import {
   DAY_LENGTH, EDGE_MARGIN, SPAWN_CLEAR_RADIUS, BUILDINGS, REGROW_TREE_RATE, REGROW_ROCK_BELOW,
-  REGROW_ROCK_EVERY, SAPLING_GROW_DAYS,
+  REGROW_ROCK_EVERY, SAPLING_GROW_DAYS, BERRY_SPREAD_RATE,
 } from './config.js';
+import { seasonEffects } from './seasons.js';
 import { heightAt, isWater, oreHeightThreshold } from './terrain.js';
 import { sizeOf, spawnOf } from './world.js';
 import { nodeAmountFor } from './settings.js';
@@ -14,6 +15,8 @@ const ROCK_GAP = 4;
 const ORE_GAP = 6;
 const TRIES = 40;
 const SAPLING_NEAR = [2, 6];      // natural saplings appear this far from a tree
+const BUSH_NEAR = [2, 6];         // new berry bushes sprout this far from a bush
+const BUSH_GAP = 1.8;
 const HOUSE_PAD = 1;
 
 // Turns saplings older than SAPLING_GROW_DAYS game days into trees.
@@ -68,6 +71,35 @@ function naturalSaplings(state, rand) {
   }
 }
 
+// New berry bushes sprout beside existing ones (or at a forest edge when none are left) until the map is
+// back to its starting count. They start bare and fill with berries over time; fewer sprout in autumn / winter.
+function spreadBushes(state, rand) {
+  const rate = BERRY_SPREAD_RATE[state.settings.regrowth];
+  const initial = state.initialNodes?.berry ?? 0;
+  const bushes = nodesOfKind(state, 'berry');
+  if (!rate || initial <= 0 || bushes.length >= initial) return 0;
+  let want = initial * rate * seasonEffects(state).berry;
+  want = Math.floor(want) + (rand() < want - Math.floor(want) ? 1 : 0);
+  want = Math.min(want, initial - bushes.length);
+  const parents = bushes.length > 0 ? bushes : nodesOfKind(state, 'tree');
+  if (parents.length === 0) return 0;
+  let made = 0;
+  for (let k = 0; k < want; k++) {
+    for (let i = 0; i < TRIES; i++) {
+      const p = parents[Math.floor(rand() * parents.length) % parents.length];
+      const ang = rand() * Math.PI * 2;
+      const rad = BUSH_NEAR[0] + rand() * (BUSH_NEAR[1] - BUSH_NEAR[0]);
+      const x = p.x + Math.cos(ang) * rad;
+      const z = p.z + Math.sin(ang) * rad;
+      if (blocked(state, x, z, BUSH_GAP)) continue;
+      addNode(state, { kind: 'berry', x, z, amount: 0, reserved: null });
+      made += 1;
+      break;
+    }
+  }
+  return made;
+}
+
 function randomSpot(state, rand, gap, spotOk) {
   const size = sizeOf(state);
   const spawn = spawnOf(state);
@@ -99,9 +131,12 @@ function refillMinerals(state, rand) {
 }
 
 // Called once per midnight; saplings/trees/rocks/ore appear according to settings.regrowth.
+export { spreadBushes };
+
 export function processRegrowth(state, rand) {
   if (!state.settings || state.settings.regrowth === 'off') return;
   naturalSaplings(state, rand);
+  spreadBushes(state, rand);
   refillMinerals(state, rand);
 }
 

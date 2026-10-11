@@ -319,5 +319,6 @@ export const MAX_SAPLINGS_PER_FORESTER = 40;
 export const SAPLING_GAP = 2.5;           // forester plants this far from other nodes/buildings/zones
 export const SAPLING_PATH_WEAR = 0.3;     // never plant on worn paths
 export const REGROW_TREE_RATE = { slow: 0.005, normal: 0.015 };   // share of initial trees per midnight
+export const BERRY_SPREAD_RATE = { slow: 0.04, normal: 0.1 };      // share of the initial bushes that sprout per midnight
 export const REGROW_ROCK_BELOW = 0.6;     // respawn rocks/ore while count < this share of the initial count
 export const REGROW_ROCK_EVERY = { slow: 3, normal: 1 };          // days between rock/ore respawns

@@ -605,6 +605,7 @@ test('a forester plants saplings that grow into trees after SAPLING_GROW_DAYS', 
   const s = world(2);
   clearVillagers(s);
   const f = staffed(s, 'forester', 150, 130);
+  f.planting = true;   // the player pressed "start planting"
   s.nodes = s.nodes.filter((n) => Math.hypot(n.x - f.x, n.z - f.z) > FORESTER_RADIUS + 5);   // open ground
   const treesBefore = countKind(s, 'tree');
   tick(s, 200);
@@ -656,6 +657,7 @@ test('a forester keeps at most MAX_SAPLINGS_PER_FORESTER saplings alive', () => 
   const s = world(2);
   clearVillagers(s);
   const f = staffed(s, 'forester', 150, 130);
+  f.planting = true;   // the player pressed "start planting"
   for (let i = 0; i < MAX_SAPLINGS_PER_FORESTER; i++) {
     addNode(s, { kind: 'sapling', x: 2 + (i % 8), z: 2 + Math.floor(i / 8), amount: 1, planted: s.time, forester: f.id });
   }
@@ -668,6 +670,7 @@ test('foresters never plant on unowned land or on worn paths', () => {
   clearVillagers(s);
   // forester at the western edge of the territory: its radius reaches 30 m into unowned land
   const f = staffed(s, 'forester', 92, 200);
+  f.planting = true;   // the player pressed "start planting"
   tick(s, 250);
   const saplings = s.nodes.filter((n) => n.kind === 'sapling');
   assert.ok(saplings.length > 0);
@@ -928,4 +931,48 @@ test('integration: large world for 20 days with a mid-run territory purchase', (
   const back = deserialize(serialize(s));
   assert.equal(back.territory.bought, 1);
   assert.doesNotThrow(() => tick(back, 30));
+});
+
+test('a new forester waits for the order to plant; pressing it starts planting in its radius', async () => {
+  const { setForesterPlanting } = await import('../src/sim.js');
+  const { buildingProblem } = await import('../src/status.js');
+  const s = world(2);
+  clearVillagers(s);
+  const f = staffed(s, 'forester', 150, 130);
+  assert.equal(f.planting, false);
+  assert.match(buildingProblem(s, f).text, /เริ่มปลูก/);
+  tick(s, 60);
+  assert.equal(s.nodes.filter((n) => n.kind === 'sapling' && n.forester === f.id).length, 0, 'nothing planted yet');
+  assert.equal(setForesterPlanting(s, f.id, true).ok, true);
+  tick(s, 120);
+  const mine = s.nodes.filter((n) => n.kind === 'sapling' && n.forester === f.id);
+  assert.ok(mine.length > 0);
+  assert.ok(mine.every((n) => Math.hypot(n.x - f.x, n.z - f.z) <= FORESTER_RADIUS + 0.01));
+  assert.equal(setForesterPlanting(s, f.id, false).ok, true);
+  const count = s.nodes.filter((n) => n.kind === 'sapling' && n.forester === f.id).length;
+  tick(s, 60);
+  assert.ok(s.nodes.filter((n) => n.kind === 'sapling' && n.forester === f.id).length <= count + 1, 'stops (one plant may finish)');
+  assert.equal(setForesterPlanting(s, townhall(s).id, true).ok, false);
+});
+
+test('new berry bushes sprout near old ones until the starting count is back (none when regrowth is off)', async () => {
+  const { spreadBushes } = await import('../src/regrowth.js');
+  const s = world(3);
+  const bushes = () => s.nodes.filter((n) => n.kind === 'berry');
+  const initial = s.initialNodes.berry;
+  assert.equal(bushes().length, initial);
+  // building cleared half the bushes
+  const removed = bushes().slice(0, Math.floor(initial / 2));
+  for (const n of removed) removeNode(s, n);
+  const before = bushes().length;
+  const rand = mulberry32(5);
+  let days = 0;
+  while (bushes().length < initial && days < 60) { spreadBushes(s, rand); days += 1; }
+  assert.ok(bushes().length > before, 'bushes came back');
+  assert.ok(bushes().length <= initial, 'never more than at the start');
+  const fresh = bushes().filter((n) => !removed.includes(n) && n.amount === 0);
+  assert.ok(fresh.length > 0, 'new bushes start without berries');
+  s.settings.regrowth = 'off';
+  for (const n of bushes().slice(0, 5)) removeNode(s, n);
+  assert.equal(spreadBushes(s, rand), 0);
 });

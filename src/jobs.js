@@ -213,7 +213,11 @@ function saplingSpotOK(state, x, z) {
   return true;
 }
 
+// Foresters plant only after the player presses "start planting" (b.planting); older saves keep planting.
+export const isPlanting = (b) => b.planting !== false;
+
 function planForester(state, v, b, cfg, rand) {
+  if (!isPlanting(b)) return planWait(v, b);   // waiting for the order to plant
   const alive = nodesOfKind(state, 'sapling').filter((n) => n.forester === b.id).length;
   if (alive >= MAX_SAPLINGS_PER_FORESTER) return planWait(v, null);
   for (let i = 0; i < PLANT_TRIES; i++) {

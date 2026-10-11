@@ -5,6 +5,7 @@ import {
   ZONE_BRUSH, GATHER_RADIUS, FIELD_RADIUS, FISH_RADIUS, HUNT_RADIUS, FOODS, SUPPLY_MAX, TOOL_SPEED_BONUS,
   SICK_LEAVE_DAYS, DAY_LENGTH, WATER_RADIUS, THIRSTY_AT, HUNGRY_AT, MARKET_SLOTS, MARKET_TREASURY_SHARE,
   SEASON_DAYS, RAIN_THIRST_MUL, SNOW_SPEED_MUL, QUARRY_ACCIDENT_CHANCE, QUARRY_TOOLED_MUL, CROPS,
+  FORESTER_RADIUS, MAX_SAPLINGS_PER_FORESTER,
 } from '../config.js';
 import * as sim from '../sim.js';
 import { createWorkforceUI } from './workforce.js';
@@ -1009,6 +1010,15 @@ export function createHUD(root, handlers = {}) {
     return h;
   }
 
+  // Forester: start / stop planting within its radius, and how many saplings are growing.
+  function foresterHtml(b, state) {
+    const on = b.planting !== false;
+    const n = ((state && state.nodes) || []).filter((x) => x.kind === 'sapling' && x.forester === b.id).length;
+    return `<div class="sub">ปลูกป่าในรัศมี ${FORESTER_RADIUS} ม. · ต้นกล้าที่กำลังโต ${n}/${MAX_SAPLINGS_PER_FORESTER}</div>`
+      + `<div class="upgrow"><button type="button" class="btn ${on ? '' : 'primary'} ubtn" data-act="plant">${on ? '⏸ หยุดปลูก' : '🌱 เริ่มปลูก'}</button></div>`
+      + `<div class="dim small">${on ? 'คนงานกำลังปลูกต้นกล้าตามจุดว่างในรัศมี ต้นกล้าโตเป็นต้นไม้ใน 2 วัน' : 'กดเริ่มปลูก แล้วคนงานจะเดินไปปลูกต้นกล้าในรัศมีของอาคารนี้'}</div>`;
+  }
+
   // Farm: which crop it grows (locked crops show the population that unlocks them).
   function farmHtml(b, state) {
     const cur = b.crop && CROPS[b.crop] ? b.crop : 'wheat';
@@ -1095,6 +1105,7 @@ export function createHUD(root, handlers = {}) {
     const sickWorkers = ((state && state.villagers) || []).filter((v) => v.sick && v.jobId === b.id).length;
     if (sickWorkers > 0) h += `<div class="warn small">🤒 คนงานป่วย ${sickWorkers} คน (หยุดงานจนกว่าจะหาย)</div>`;
     if (def.job === 'farm') h += farmHtml(b, state);
+    if (def.job === 'forester') h += foresterHtml(b, state);
     if (def.job === 'market') h += marketHtml(b, def, state);
     else if (def.supply) h += supplyHtml(b, def, state);
     else if (def.storage || b.stock) h += stockHtml(b);
@@ -1114,7 +1125,9 @@ export function createHUD(root, handlers = {}) {
     if (btn.dataset.act === 'workforce') { openWorkforce(); return; }
     const b = findBuilding(lastState, infoId);
     if (!b) return;
-    if (btn.dataset.act === 'crop') {
+    if (btn.dataset.act === 'plant') {
+      call('setForesterPlanting', b.id, b.planting === false);
+    } else if (btn.dataset.act === 'crop') {
       const res = call('setFarmCrop', b.id, btn.dataset.crop);
       if (res && !res.ok) toast(res.reason);
     } else if (btn.dataset.act === 'sell') {

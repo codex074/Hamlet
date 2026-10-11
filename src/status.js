@@ -53,6 +53,10 @@ export function buildingProblem(state, b) {
       }
       break;
     }
+    case 'forester': {
+      if (b.planting === false) return { code: 'idle-order', text: 'ยังไม่ได้สั่งปลูก — กด 🌱 เริ่มปลูก', blocking: false };
+      break;
+    }
     case 'fish': {
       if (Array.isArray(b.shore) && b.shore.length === 0) return { code: 'no-water', text: 'ไม่มีจุดตกปลาริมน้ำในระยะ', blocking: true };
       break;

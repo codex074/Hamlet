@@ -229,6 +229,14 @@ export function paintZone(state, kind, x, z, r) {
   return zone.id;
 }
 
+// Forester: start / stop planting saplings within its radius.
+export function setForesterPlanting(state, bId, on) {
+  const b = getBuilding(state, bId);
+  if (!b || BUILDINGS[b.type]?.job !== 'forester') return { ok: false, reason: 'ไม่ใช่คนปลูกป่า' };
+  b.planting = !!on;
+  return { ok: true };
+}
+
 function deliveredMaterials(b) {
   const out = {};
   const add = (cost, needed = {}) => {
