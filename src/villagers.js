@@ -8,6 +8,7 @@ import {
 import { nearestFoodSource, buyMeal } from './market.js';
 import { nearestWater } from './water.js';
 import { seasonEffects } from './seasons.js';
+import { planHarvest } from './harvest.js';
 import { recordFood } from './status.js';
 import { mulberry32, randRange } from './rng.js';
 import { pickGivenName, pickSurname, fullName } from './names.js';
@@ -314,6 +315,11 @@ export function planNext(state, v, rand) {
       v.role = 'builder';
       return;
     }
+  }
+  // no post (or a builder with nothing to build): gather the trees, rocks and ore the player marked
+  if (v.jobId == null && canBuild(v) && planHarvest(state, v)) {
+    v.role = 'worker';
+    return;
   }
   planWander(state, v, rand);
 }

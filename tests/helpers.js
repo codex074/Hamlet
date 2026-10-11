@@ -81,9 +81,8 @@ export function makeBuilders(state, n = Infinity) {
   return k;
 }
 
-// Plays the role of an attentive player (mirrors the old automatic behaviour): keeps `builders` people
-// on the builder crew while there is construction, fills every open workplace slot, then puts everyone
-// still free on the builder crew too.
+// Plays the role of an attentive player: keeps `builders` people on the builder crew while there is
+// construction and fills every open workplace slot (pulling surplus builders in if needed).
 export function staffVillage(state, builders = 3) {
   const crew = () => state.villagers.filter((v) => v.builder);
   const sites = state.buildings.some((b) => !b.built || b.upgrading);
@@ -97,7 +96,7 @@ export function staffVillage(state, builders = 3) {
       assignJob(state, v.id, b.id);
     }
   }
-  makeBuilders(state);
+  // everyone left stays free: they gather the trees, rocks and ore marked for harvest
 }
 
 export function clearVillagers(state) {

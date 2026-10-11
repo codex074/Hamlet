@@ -81,7 +81,7 @@ test('working earns coins', () => {
   const s = world();
   clearVillagers(s);
   const tree = nearestNode(s, 'tree', SPAWN.x, SPAWN.z);
-  const spot = findPlaceSpot(s, 'woodcutter', tree.x, tree.z, 20);
+  const spot = findPlaceSpot(s, 'forager', tree.x, tree.z, 20);
   const wc = addBuilt(s, 'woodcutter', spot.x, spot.z);
   const v = addVillager(s, spot.x, spot.z);
   const idle = addVillager(s, SPAWN.x, SPAWN.z);

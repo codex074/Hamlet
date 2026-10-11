@@ -61,6 +61,14 @@ const ZONE_ITEMS = [
     desc: 'ระบายพื้นที่ปลูกข้าวสาลีให้ฟาร์ม ดินอุดมจะให้ผลผลิตมากกว่า' },
 ];
 
+// Harvest brushes (resource tab): mark trees / rocks / ore for free villagers to gather, or clear the marks.
+const HARVEST_ITEMS = [
+  { zone: 'harvest', icon: '🪓', name: 'เก็บทรัพยากร',
+    desc: 'ระบายคลุมต้นไม้ ก้อนหิน หรือสายแร่ที่ต้องการเก็บ ชาวบ้านที่ว่างงาน (และช่างก่อสร้างที่ไม่มีงาน) จะไปตัด/ขุดแล้วขนเข้าโกดังที่ใกล้ที่สุด' },
+  { zone: 'unharvest', icon: '🚫', name: 'ยกเลิกการเก็บ',
+    desc: 'ระบายคลุมจุดที่เลือกไว้เพื่อยกเลิก — ต้นไม้ หิน และแร่ตรงนั้นจะไม่ถูกเก็บ' },
+];
+
 const TAB_DEFS = [
   { id: 'residential', label: 'ที่อยู่' },
   { id: 'resource', label: 'ทรัพยากร', category: 'resource' },
@@ -402,8 +410,22 @@ export function createHUD(root, handlers = {}) {
         panel.appendChild(rec.btn);
       }
     } else {
+      if (t.id === 'resource') {
+        for (const z of HARVEST_ITEMS) {
+          const rec = makeToolButton({
+            id: `zone:${z.zone}`, tab: t.id, icon: z.icon, name: z.name, costText: 'ฟรี',
+            tool: { kind: 'zone', zone: z.zone },
+            tip: () => {
+              const hv = lastSummary && lastSummary.harvest;
+              const now = hv ? `<br><span class="dim">เลือกไว้: 🌲 ${hv.tree} · 🪨 ${hv.rock} · ⛰️ ${hv.ore}</span>` : '';
+              return `<b>${z.name}</b><br>${z.desc}<br><span class="dim">ขนาดแปรง ${ZONE_BRUSH.min}–${ZONE_BRUSH.max} ม. ปรับด้วย [ ]</span>${now}`;
+            },
+          });
+          panel.appendChild(rec.btn);
+        }
+      }
       for (const [type, d] of Object.entries(BUILDINGS)) {
-        if (d.category !== t.category) continue;
+        if (d.category !== t.category || d.retired) continue;
         const isCath = type === 'cathedral';
         const rec = makeToolButton({
           id: `build:${type}`, tab: t.id, type, icon: BUILDING_ICON[type] || '🏠', name: d.name,
@@ -825,7 +847,7 @@ export function createHUD(root, handlers = {}) {
       job = title && title !== where ? `${esc(title)} · ${bLink(vi.job.id, where)}` : bLink(vi.job.id, where);
     }
     else if (v && v.builder) job = `🏗️ ${esc(title)}`;
-    else job = '<span class="warn">ว่างงาน</span>';
+    else job = v && v.role === 'worker' ? '🪓 ว่างงาน · กำลังเก็บทรัพยากร' : '<span class="warn">ว่างงาน</span>';
     if (stage !== 'child') job += ' <button type="button" class="btn small" data-act="job">เปลี่ยนงาน</button>';
     rows.push(['งาน', job]);
     const wait = v && typeof sim.waitingReason === 'function' ? sim.waitingReason(state, v) : null;

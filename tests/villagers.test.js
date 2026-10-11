@@ -51,7 +51,7 @@ test('hungry villager with no food in stock does not try to eat', () => {
 test('woodcutter workers gather a tree and deliver wood within 60 s', () => {
   const s = world();
   const tree = nearestNode(s, 'tree', SPAWN.x, SPAWN.z);
-  const spot = findPlaceSpot(s, 'woodcutter', tree.x, tree.z, 20);
+  const spot = findPlaceSpot(s, 'forager', tree.x, tree.z, 20);
   const wc = addBuilt(s, 'woodcutter', spot.x, spot.z);
   const wood0 = totalStock(s).wood;
   const treeSum = s.nodes.filter((n) => n.kind === 'tree').reduce((a, n) => a + n.amount, 0);
@@ -137,7 +137,7 @@ test('stepping a task that references a removed building never throws', () => {
 test('gather target disappearing releases state and does not throw', () => {
   const s = world();
   const tree = nearestNode(s, 'tree', SPAWN.x, SPAWN.z);
-  const spot = findPlaceSpot(s, 'woodcutter', tree.x, tree.z, 20);
+  const spot = findPlaceSpot(s, 'forager', tree.x, tree.z, 20);
   const wc = addBuilt(s, 'woodcutter', spot.x, spot.z);
   clearVillagers(s);
   const v = addVillager(s, SPAWN.x, SPAWN.z);

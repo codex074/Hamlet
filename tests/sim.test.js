@@ -49,51 +49,51 @@ test('createWorld is deterministic per seed', () => {
 
 test('canPlace rejects locked types, townhall/house and a second cathedral', () => {
   const s = world();
-  const spot = findPlaceSpot(s, 'woodcutter', SPAWN.x + 15, SPAWN.z);
+  const spot = findPlaceSpot(s, 'forager', SPAWN.x + 15, SPAWN.z);
   assert.equal(canPlace(s, 'tavern', spot.x, spot.z, 0).ok, false);
   assert.match(canPlace(s, 'tavern', spot.x, spot.z, 0).reason, /ปลดล็อก/);
   assert.equal(isUnlocked(s, 'tavern'), false);
-  assert.equal(isUnlocked(s, 'woodcutter'), true);
+  assert.equal(isUnlocked(s, 'forager'), true);
   assert.equal(isUnlocked(s, 'townhall'), false);
   assert.equal(isUnlocked(s, 'house'), false);
   assert.equal(canPlace(s, 'house', spot.x, spot.z, 0).ok, false);
   assert.equal(canPlace(s, 'townhall', spot.x, spot.z, 0).ok, false);
-  assert.equal(canPlace(s, 'woodcutter', spot.x, spot.z, 0).ok, true);
+  assert.equal(canPlace(s, 'forager', spot.x, spot.z, 0).ok, true);
   for (let i = 0; i < 20; i++) addVillager(s, SPAWN.x, SPAWN.z);
   assert.equal(isUnlocked(s, 'cathedral'), true);
   const cspot = findPlaceSpot(s, 'cathedral', SPAWN.x + 30, SPAWN.z);
   assert.ok(placeBuilding(s, 'cathedral', cspot.x, cspot.z, 0) > 0);
-  const second = findPlaceSpot(s, 'woodcutter', SPAWN.x - 30, SPAWN.z - 30);
+  const second = findPlaceSpot(s, 'forager', SPAWN.x - 30, SPAWN.z - 30);
   assert.equal(canPlace(s, 'cathedral', second.x, second.z, 0).ok, false);
   assert.match(canPlace(s, 'cathedral', second.x, second.z, 0).reason, /มหาวิหาร/);
 });
 
 test('canPlace respects placement rules (overlap with townhall)', () => {
   const s = world();
-  assert.equal(canPlace(s, 'woodcutter', SPAWN.x + 2, SPAWN.z, 0).ok, false);
+  assert.equal(canPlace(s, 'forager', SPAWN.x + 2, SPAWN.z, 0).ok, false);
 });
 
 test('placeBuilding creates a site and removes overlapping trees into the storage', () => {
   const s = world();
-  const spot = findPlaceSpot(s, 'woodcutter', SPAWN.x + 30, SPAWN.z + 10, 60);
+  const spot = findPlaceSpot(s, 'forager', SPAWN.x + 30, SPAWN.z + 10, 60);
   s.nodes.push({ id: 90001, kind: 'tree', x: spot.x + 1, z: spot.z, amount: 4, reserved: null });
   s.nodes.push({ id: 90002, kind: 'tree', x: spot.x - 1, z: spot.z, amount: 3, reserved: null });
   const n0 = s.nodes.length;
   const wood0 = townhall(s).stock.wood;
-  const id = placeBuilding(s, 'woodcutter', spot.x, spot.z, 1.2);
+  const id = placeBuilding(s, 'forager', spot.x, spot.z, 1.2);
   assert.ok(id);
   const b = s.buildings.find((x) => x.id === id);
   assert.equal(b.built, false);
   assert.equal(b.progress, 0);
-  assert.deepEqual(b.needed, BUILDINGS.woodcutter.cost);
-  assert.notEqual(b.needed, BUILDINGS.woodcutter.cost);
+  assert.deepEqual(b.needed, BUILDINGS.forager.cost);
+  assert.notEqual(b.needed, BUILDINGS.forager.cost);
   assert.deepEqual(b.incoming, {});
   assert.deepEqual(b.workers, []);
   assert.equal(b.rot, 1.2);
   assert.ok(s.nodes.length <= n0 - 2);
   assert.ok(townhall(s).stock.wood >= wood0 + 7);
   assert.ok(s.events.at(-1).text.includes('เริ่มก่อสร้าง'));
-  assert.equal(placeBuilding(s, 'woodcutter', spot.x, spot.z, 0), null);
+  assert.equal(placeBuilding(s, 'forager', spot.x, spot.z, 0), null);
 });
 
 test('placing a cathedral starts stage 0 and gold-gated stages block until paid', () => {
@@ -253,7 +253,7 @@ test('summary fields', () => {
   const s = world();
   const sum = summary(s);
   assert.deepEqual(Object.keys(sum).sort(),
-    ['adults', 'births', 'children', 'day', 'deaths', 'difficulty', 'elders', 'food', 'gold', 'happiness', 'homeless', 'hour',
+    ['adults', 'births', 'children', 'day', 'deaths', 'difficulty', 'elders', 'food', 'gold', 'happiness', 'harvest', 'homeless', 'hour',
       'housing', 'isNight', 'ownedPlots', 'pop', 'pregnant', 'season', 'sick', 'snow', 'stock', 'totalPlots', 'unemployed',
       'weather', 'workforce']);
   assert.deepEqual([sum.adults, sum.children, sum.elders, sum.pregnant, sum.births, sum.deaths], [8, 0, 0, 0, 0, 0]);
@@ -307,9 +307,9 @@ test('INTEGRATION: three game days of a small village', () => {
   assert.ok(paintZone(s, 'residential', zspot.x, zspot.z, 10));
 
   const tree = nearestNode(s, 'tree', SPAWN.x, SPAWN.z);
-  const wcSpot = findPlaceSpot(s, 'woodcutter', tree.x, tree.z);
-  const wcId = placeBuilding(s, 'woodcutter', wcSpot.x, wcSpot.z, 0);
-  assert.ok(wcId, 'woodcutter placed');
+  const marked = paintZone(s, 'harvest', tree.x, tree.z, 8);
+  assert.ok(marked > 0, 'trees marked for felling');
+  const markedIds = s.nodes.filter((n) => n.marked).map((n) => n.id);
   const berry = nearestNode(s, 'berry', SPAWN.x, SPAWN.z);
   const fgSpot = findPlaceSpot(s, 'forager', berry.x, berry.z);
   assert.ok(placeBuilding(s, 'forager', fgSpot.x, fgSpot.z, 0), 'forager placed');
@@ -330,10 +330,10 @@ test('INTEGRATION: three game days of a small village', () => {
     }
   }
 
-  const wc = s.buildings.find((b) => b.id === wcId);
-  assert.equal(wc.built, true);
-  assert.ok(wc.workers.length > 0, 'woodcutter staffed');
-  assert.ok(treeTotal() < trees0, 'trees were chopped');
+
+  const left = s.nodes.filter((n) => markedIds.includes(n.id)).reduce((a, n) => a + n.amount, 0);
+  assert.ok(left < markedIds.length * NODE_AMOUNT.tree, `free villagers felled the marked trees (${left} left)`);
+  assert.ok(treeTotal() > 0 && trees0 > 0);
   const houses = s.buildings.filter((b) => b.type === 'house' && b.built);
   assert.ok(houses.length >= 2, `houses built: ${houses.length}`);
   assert.ok(Math.max(...s.wear) > 0.5, `max wear ${Math.max(...s.wear)}`);
@@ -366,7 +366,7 @@ test('INTEGRATION: thirty game days (seed 5) with fishery, hunter, sheepfarm, he
   };
   const tree = nearestNode(s, 'tree', SPAWN.x, SPAWN.z);
   put('storehouse', SPAWN.x - 18, SPAWN.z);
-  put('woodcutter', tree.x, tree.z);
+  assert.ok(paintZone(s, 'harvest', tree.x, tree.z, 10) > 0, 'trees marked for felling');
   put('forager', SPAWN.x, SPAWN.z + 25);
   put('chapel', SPAWN.x - 25, SPAWN.z + 15);
   put('fishery', SPAWN.x, SPAWN.z - 35);

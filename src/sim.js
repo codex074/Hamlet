@@ -30,6 +30,7 @@ import {
 } from './families.js';
 import { updateBuildingStatus, foodSummary } from './status.js';
 import { seasonOf, weatherAt, seasonEffects, updateSnow, seasonChangeText } from './seasons.js';
+import { HARVEST_BRUSHES, canMark, markResources, harvestSummary } from './harvest.js';
 import {
   ensureMarket, setMarketGoods, MARKET_GOODS, DEFAULT_MARKET_GOODS, priceOf, stockMaxOf,
 } from './market.js';
@@ -91,7 +92,7 @@ export function createWorld(seed, settings = DEFAULT_SETTINGS) {
   state.animals = createDeer(state);
   state.manualJobs = true;
   state.waterIntro = true;
-  pushEvent(state, 'ยินดีต้อนรับสู่หมู่บ้านใหม่ของคุณ เริ่มสร้างโรงตัดไม้และโกดังได้เลย');
+  pushEvent(state, 'ยินดีต้อนรับสู่หมู่บ้านใหม่ของคุณ — ระบายเลือกต้นไม้ให้ชาวบ้านไปตัด แล้วสร้างคนเก็บของป่าและโกดังได้เลย');
   pushEvent(state, '👥 ชาวบ้านยังไม่มีงาน — เปิด "จัดการงาน" แล้วมอบหมายช่างก่อสร้างก่อน จากนั้นจึงส่งคนไปทำงานที่อาคารต่างๆ', {
     kind: 'info', detail: 'ระบบจะไม่ส่งใครไปทำงานเอง ช่างก่อสร้างขนวัสดุและสร้างอาคาร ส่วนอาคารผลิตต้องเลือกคนงานเองที่แผงของอาคาร',
   });
@@ -111,7 +112,7 @@ export function setDifficulty(state, level) {
 
 export function isUnlocked(state, type) {
   const cfg = BUILDINGS[type];
-  if (!cfg || type === 'townhall' || type === 'house') return false;
+  if (!cfg || type === 'townhall' || type === 'house' || cfg.retired) return false;   // retired: replaced by harvest orders
   return state.villagers.length >= cfg.unlockPop;
 }
 
@@ -131,6 +132,7 @@ export function buildingAt(state, x, z) {
 export function canPlace(state, type, x, z, rot) {
   const cfg = BUILDINGS[type];
   if (!cfg || type === 'townhall' || type === 'house') return { ok: false, reason: 'วางอาคารนี้ไม่ได้' };
+  if (cfg.retired) return { ok: false, reason: 'เลิกใช้แล้ว — ระบายเลือกต้นไม้/หิน/แร่ให้ชาวบ้านที่ว่างงานไปเก็บแทน' };
   if (!isUnlocked(state, type)) {
     return { ok: false, reason: `ยังไม่ปลดล็อก (ต้องมีประชากร ${cfg.unlockPop} คน)` };
   }
@@ -141,6 +143,7 @@ export function canPlace(state, type, x, z, rot) {
 }
 
 export function canPaintZone(state, kind, x, z, r) {
+  if (HARVEST_BRUSHES.includes(kind)) return canMark(state, kind, x, z, r);
   if (!ZONE_KINDS.includes(kind)) return { ok: false, reason: 'ชนิดโซนไม่ถูกต้อง' };
   if (r < ZONE_BRUSH.min || r > ZONE_BRUSH.max) return { ok: false, reason: 'ขนาดแปรงไม่ถูกต้อง' };
   return placementCanPaintZone(state, kind, x, z, r);
@@ -170,7 +173,7 @@ export function summary(state) {
     ...populationCounts(state), births: state.births ?? 0, deaths: state.deaths ?? 0,
     ownedPlots: ownedPlotCount(state), totalPlots: (state.world?.plots ?? 0) ** 2,
     difficulty: state.difficulty ?? 'normal',
-    season: seasonOf(state), weather: weatherAt(state), snow: state.snow ?? 0,
+    season: seasonOf(state), weather: weatherAt(state), snow: state.snow ?? 0, harvest: harvestSummary(state),
   };
 }
 
@@ -210,8 +213,10 @@ export function placeBuilding(state, type, x, z, rot) {
   return b.id;
 }
 
+// Zone kinds create a zone (returns its id); the harvest brushes mark / unmark nodes (returns how many).
 export function paintZone(state, kind, x, z, r) {
   if (!canPaintZone(state, kind, x, z, r).ok) return null;
+  if (HARVEST_BRUSHES.includes(kind)) return markResources(state, kind, x, z, r);
   const zone = { id: state.nextId++, kind, x, z, r };
   state.zones.push(zone);
   return zone.id;

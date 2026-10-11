@@ -25,6 +25,10 @@ const stageOf = (v) => {
 };
 const fullName = (v) => [v.name, v.surname].filter(Boolean).join(' ') || `ชาวบ้าน #${v.id}`;
 
+function harvestLeft(state) {
+  return state.nodes.reduce((a, n) => a + (n.marked && n.amount >= 1 ? 1 : 0), 0);
+}
+
 function flags(v) {
   let out = '';
   if (stageOf(v) === 'elder') out += v.gender === 'f' ? '👵' : '👴';
@@ -96,7 +100,7 @@ export function createWorkforceUI({ root, call, getState, toast, icon }) {
       btn.type = 'button';
       btn.disabled = !c.ok && !c.current;
       let desc;
-      if (c.key == null) desc = 'ไม่ทำงาน — เดินเล่นแถวบ้าน';
+      if (c.key == null) desc = 'เก็บต้นไม้/หิน/แร่ที่ระบายเลือกไว้ (ถ้าไม่มีก็เดินเล่น)';
       else if (c.key === sim.BUILDER) desc = `ขนวัสดุและสร้างอาคาร · ตอนนี้ ${c.count} คน`;
       else desc = `${c.title ? `ตำแหน่ง ${c.title} · ` : ''}คนงาน ${c.count}/${c.max}${c.light ? ' · งานเบา' : ''}`;
       if (!c.ok && c.reason) desc += ` · ${c.reason}`;
@@ -143,7 +147,7 @@ export function createWorkforceUI({ root, call, getState, toast, icon }) {
   let panelSig = '';
   function openWorkforce() {
     const box = openModal('panel', 'wf-panel', '👥 จัดการงาน');
-    box.appendChild(el('div', 'wf-sub', 'ระบบจะไม่ส่งใครไปทำงานเอง — เลือกงานให้ชาวบ้านแต่ละคน ชุดของเขาจะเปลี่ยนตามงานที่ได้รับ'));
+    box.appendChild(el('div', 'wf-sub', 'เลือกงานให้ชาวบ้านแต่ละคน ชุดของเขาจะเปลี่ยนตามงานที่ได้รับ — คนที่ว่างงานจะไปเก็บต้นไม้/หิน/แร่ที่ระบายเลือกไว้'));
     const sum = el('div', 'wf-sum');
     const tabs = el('div', 'wf-tabs');
     for (const f of FILTERS) {
@@ -212,7 +216,8 @@ export function createWorkforceUI({ root, call, getState, toast, icon }) {
     const kids = state.villagers.length - people.length;
     modal.parts.sum.innerHTML = `<span>ทำงานได้ <b>${ws.able}</b></span><span class="${ws.free > 0 ? 'hi' : ''}">ว่างงาน <b>${ws.free}</b></span>`
       + `<span class="${ws.sites > 0 && ws.builders === 0 ? 'bad' : ''}">${BUILDER_ICON} ช่างก่อสร้าง <b>${ws.builders}</b>${ws.sites > 0 ? ` <span class="dim">(งานก่อสร้าง ${ws.sites})</span>` : ''}</span>`
-      + `<span class="${ws.openSlots > 0 ? 'hi' : ''}">ตำแหน่งว่าง <b>${ws.openSlots}</b></span>${kids ? `<span class="dim">เด็ก ${kids}</span>` : ''}`;
+      + `<span class="${ws.openSlots > 0 ? 'hi' : ''}">ตำแหน่งว่าง <b>${ws.openSlots}</b></span>${kids ? `<span class="dim">เด็ก ${kids}</span>` : ''}`
+      + `<span>🪓 รอเก็บ <b>${harvestLeft(state)}</b></span>`;
     const shown = people.filter((v) => (filter === 'free' ? v.jobId == null && !v.builder
       : filter === 'builder' ? v.builder : filter === 'job' ? v.jobId != null : true))
       .sort((a, b) => fullName(a).localeCompare(fullName(b), 'th') || a.id - b.id);

@@ -390,7 +390,7 @@ test('buyPlot deducts gold, extends the territory and raises the price; refusals
 
 test('placement and zones are blocked outside owned land, including partly outside', () => {
   const s = createWorld(1, MEDIUM);
-  const out = canPlace(s, 'woodcutter', 40, 200, 0);
+  const out = canPlace(s, 'forager', 40, 200, 0);
   assert.deepEqual(out, { ok: false, reason: 'อยู่นอกดินแดนของคุณ' });
   assert.deepEqual(canPaintZone(s, 'field', 40, 200, 9), { ok: false, reason: 'อยู่นอกดินแดนของคุณ' });
   // straddling the 80 m border: radius 3.5 at x = 82 reaches x = 78.5
@@ -400,11 +400,11 @@ test('placement and zones are blocked outside owned land, including partly outsi
   assert.notEqual(footprintOK(s, 200, 316, 3.5).reason, 'อยู่นอกดินแดนของคุณ');
   // a corner of an unowned plot pokes into the circle diagonally
   assert.equal(footprintOK(s, 83, 83, 5).reason, 'อยู่นอกดินแดนของคุณ');
-  assert.equal(placeBuilding(s, 'woodcutter', 40, 200, 0), null);
+  assert.equal(placeBuilding(s, 'forager', 40, 200, 0), null);
   // after buying the plot the same spot is no longer refused for ownership
   s.gold = 500;
   assert.equal(buyPlot(s, 0, 2).ok, true);
-  assert.notEqual(canPlace(s, 'woodcutter', 40, 200, 0).reason, 'อยู่นอกดินแดนของคุณ');
+  assert.notEqual(canPlace(s, 'forager', 40, 200, 0).reason, 'อยู่นอกดินแดนของคุณ');
 });
 
 test('house sites are chosen entirely on owned land', () => {
@@ -569,8 +569,8 @@ test('difficulty scales the cost of NEW placements (rounded up, min 1); refunds 
   // changing difficulty later does not reprice sites already placed
   const s = world(1);
   setDifficulty(s, 'hard');
-  const spot = findPlaceSpot(s, 'woodcutter', 100, 130);
-  const bid = placeBuilding(s, 'woodcutter', spot.x, spot.z, 0);
+  const spot = findPlaceSpot(s, 'forager', 100, 130);
+  const bid = placeBuilding(s, 'forager', spot.x, spot.z, 0);
   const b = s.buildings.find((x) => x.id === bid);
   assert.deepEqual(b.needed, { wood: 10 });                    // ceil(10)
   setDifficulty(s, 'easy');
@@ -583,7 +583,7 @@ test('difficulty scales the cost of NEW placements (rounded up, min 1); refunds 
   // min 1 per resource
   const tiny = world(1);
   setDifficulty(tiny, 'easy');
-  const wid = placeBuilding(tiny, 'woodcutter', spot.x, spot.z, 0);
+  const wid = placeBuilding(tiny, 'forager', spot.x, spot.z, 0);
   const wc = tiny.buildings.find((x) => x.id === wid);
   assert.equal(wc.needed.wood, 6);
 });

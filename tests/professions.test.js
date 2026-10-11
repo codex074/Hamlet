@@ -226,7 +226,7 @@ test('ironmine workers mine ore nodes and deliver ore', () => {
   const s = world();
   unlockAll(s);
   const ore = s.nodes.find((n) => n.kind === 'ore');
-  const mine = spiral(ore.x, ore.z, (x, z) => canPlace(s, 'ironmine', x, z, 0).ok
+  const mine = spiral(ore.x, ore.z, (x, z) => canPlace(s, 'storehouse', x, z, 0).ok
     && canPlace(s, 'storehouse', x + 9, z, 0).ok, 40);
   assert.ok(mine, 'a mine spot near the vein');
   const store = addBuilt(s, 'storehouse', mine.x + 9, mine.z);

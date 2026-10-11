@@ -10,6 +10,7 @@ import { createNodesView, createGroundDetail } from './nature.js';
 import { createSmoke, createFireflies, createSparkles } from './effects.js';
 import { createAnimalsView } from './animals.js';
 import { createVillagerView } from './villagerView.js';
+import { createHarvestMarks } from './harvestMarks.js';
 import { getGraphics, onGraphicsChange } from './graphics.js';
 
 const NIGHT_GLOW = 1.2;
@@ -139,6 +140,7 @@ export function createWorldView(scene, terrain) {
   const fireflies = createFireflies(root, { heightAt: (x, z) => heightAt(terrain, x, z) });
   const animals = createAnimalsView(root, terrain);
   const sparkles = createSparkles(root);
+  const harvestMarks = createHarvestMarks(root, terrain);
   const modelGroups = new Map();   // buildingId -> finished model group (animals read userData.pen from it)
   let smokeDirty = true;
   const _v = new THREE.Vector3();
@@ -657,6 +659,7 @@ export function createWorldView(scene, terrain) {
     syncZones(state);
 
     nodesView.update(state, dt);
+    harvestMarks.update(state, dt);
     groundDetail.update(state, dt, view && view.targetSet ? view.target : undefined);
     if (smokeDirty) refreshSmoke();
     smoke.update(dt, night);
@@ -708,7 +711,7 @@ export function createWorldView(scene, terrain) {
     for (const { mesh } of zoneMeshes.values()) { root.remove(mesh); mesh.geometry.dispose(); }
     zoneMeshes.clear();
     nodesView.dispose(); groundDetail.dispose(); smoke.dispose(); fireflies.dispose();
-    animals.dispose(); sparkles.dispose();
+    animals.dispose(); sparkles.dispose(); harvestMarks.dispose();
     villagerView.dispose();
     ring.geometry.dispose(); ring.material.dispose();
     vRing.geometry.dispose(); vRing.material.dispose();
