@@ -209,7 +209,8 @@ float zNoise( vec2 p ) {
   vec2 i = floor( p ); vec2 f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
   return mix( mix( zHash( i ), zHash( i + vec2( 1.0, 0.0 ) ), f.x ), mix( zHash( i + vec2( 0.0, 1.0 ) ), zHash( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
 }`)
-      .replace('#include <color_fragment>', `#include <color_fragment>
+      // after the weather patch (snow, wet ground) so zones stay readable — softened — under snow
+      .replace('#include <lights_lambert_fragment>', `
 if ( uZoneOn > 0.5 ) {
   vec2 zm = texture2D( uZoneMap, vZoneXZ / uZoneSize ).rg;
   float jit = ( zNoise( vZoneXZ * 0.9 ) - 0.5 ) * 0.22;   // brushy, slightly uneven edge
@@ -222,8 +223,10 @@ if ( uZoneOn > 0.5 ) {
   float furrow = 0.5 + 0.5 * sin( vZoneXZ.y * 3.14159 );   // 2 m rows, continuous across strokes
   c = mix( c, mix( uFieldDark, uFieldTint, smoothstep( 0.25, 0.75, furrow ) ), fld * 0.62 );
   c *= 1.0 - 0.16 * max( resRim, fldRim );                 // soft outline only around the outer border
-  diffuseColor.rgb = c;
-}`);
+  float snowy = smoothstep( 0.72, 0.9, dot( diffuseColor.rgb, vec3( 0.33 ) ) );
+  diffuseColor.rgb = mix( c, diffuseColor.rgb, snowy * 0.55 );
+}
+#include <lights_lambert_fragment>`);
   };
   terrainMat.customProgramCacheKey = () => 'terrain-zones';
   let zoneSig = '';
