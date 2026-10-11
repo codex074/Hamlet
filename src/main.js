@@ -334,6 +334,7 @@ function boot(session) {
     if (speed > 0) sim.tick(state, realDt * speed);
     cameraController.update(realDt);
     worldView.sync(state, realDt);
+    terrainView.setZones(state.zones);   // painted zones appear while the brush is still moving
 
     wearTimer += realDt;
     if (wearTimer >= 1) {

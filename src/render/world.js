@@ -17,38 +17,6 @@ const NIGHT_GLOW = 1.2;
 const _lab = new THREE.Vector3();
 
 
-// Flat translucent disc that hugs the terrain (rings of vertices sampled from heightAt).
-function makeZoneGeometry(terrain, x, z, r) {
-  const rings = Math.max(2, Math.ceil(r / 2));
-  const segs = 40;
-  const pos = [];
-  const idx = [];
-  pos.push(x, heightAt(terrain, x, z) + 0.2, z);
-  for (let ri = 1; ri <= rings; ri++) {
-    const rr = (ri / rings) * r;
-    for (let s = 0; s < segs; s++) {
-      const a = (s / segs) * Math.PI * 2;
-      const px = x + Math.cos(a) * rr;
-      const pz = z + Math.sin(a) * rr;
-      pos.push(px, heightAt(terrain, px, pz) + 0.2, pz);
-    }
-  }
-  for (let s = 0; s < segs; s++) idx.push(0, 1 + ((s + 1) % segs), 1 + s);
-  for (let ri = 1; ri < rings; ri++) {
-    const a0 = 1 + (ri - 1) * segs;
-    const b0 = 1 + ri * segs;
-    for (let s = 0; s < segs; s++) {
-      const s2 = (s + 1) % segs;
-      idx.push(a0 + s, a0 + s2, b0 + s, a0 + s2, b0 + s2, b0 + s);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setIndex(idx);
-  return geo;
-}
-
-
 // ------------------------------------------------------------------ territory helpers
 
 const FRONTIER_COLOR = 0xffe9a8;
@@ -128,7 +96,6 @@ export function createWorldView(scene, terrain) {
 
   const view = scene.userData.view || null;   // { camera, target, canvas, renderer } published by createScene()
   const buildings = new Map();   // id -> { group, signature }
-  const zoneMeshes = new Map();  // id -> { mesh, signature }
   let night = false;
   let highlightId = null;
   let clock = 0;
@@ -283,41 +250,6 @@ export function createWorldView(scene, terrain) {
         buildings.delete(id);
         smokeDirty = true;
         if (highlightId === id) highlightId = null;
-      }
-    }
-  }
-
-  // ------------------------------------------------------------ zones
-  const zoneMats = {
-    residential: new THREE.MeshBasicMaterial({
-      color: 0x4fb04a, transparent: true, opacity: 0.18, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    }),
-    field: new THREE.MeshBasicMaterial({
-      color: 0xe0c030, transparent: true, opacity: 0.18, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    }),
-  };
-
-  function syncZones(state) {
-    const alive = new Set();
-    for (const z of state.zones) {
-      alive.add(z.id);
-      const sig = `${z.kind}|${z.x}|${z.z}|${z.r}`;
-      const entry = zoneMeshes.get(z.id);
-      if (entry && entry.signature === sig) continue;
-      if (entry) { root.remove(entry.mesh); entry.mesh.geometry.dispose(); }
-      const mesh = new THREE.Mesh(makeZoneGeometry(terrain, z.x, z.z, z.r), zoneMats[z.kind] || zoneMats.residential);
-      mesh.renderOrder = 2;
-      mesh.name = `zone-${z.id}`;
-      root.add(mesh);
-      zoneMeshes.set(z.id, { mesh, signature: sig });
-    }
-    for (const [id, entry] of zoneMeshes) {
-      if (!alive.has(id)) {
-        root.remove(entry.mesh);
-        entry.mesh.geometry.dispose();
-        zoneMeshes.delete(id);
       }
     }
   }
@@ -656,7 +588,6 @@ export function createWorldView(scene, terrain) {
   function sync(state, dt = 0) {
     clock += dt;
     syncBuildings(state, dt);
-    syncZones(state);
 
     nodesView.update(state, dt);
     harvestMarks.update(state, dt);
@@ -708,14 +639,11 @@ export function createWorldView(scene, terrain) {
   function dispose() {
     for (const { group } of buildings.values()) { root.remove(group); disposeGroup(group); }
     buildings.clear();
-    for (const { mesh } of zoneMeshes.values()) { root.remove(mesh); mesh.geometry.dispose(); }
-    zoneMeshes.clear();
     nodesView.dispose(); groundDetail.dispose(); smoke.dispose(); fireflies.dispose();
     animals.dispose(); sparkles.dispose(); harvestMarks.dispose();
     villagerView.dispose();
     ring.geometry.dispose(); ring.material.dispose();
     vRing.geometry.dispose(); vRing.material.dispose();
-    zoneMats.residential.dispose(); zoneMats.field.dispose();
     clearTerritoryView();
     for (const m of [frontierMesh, gridMesh]) if (m) { root.remove(m); m.geometry.dispose(); }
     [frontierMat, gridMat, buyMat, brokeMat, hoverMat, outlineMat].forEach((m) => m.dispose());

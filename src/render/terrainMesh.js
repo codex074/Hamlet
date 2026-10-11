@@ -174,6 +174,81 @@ export function createTerrainMesh(terrain) {
 
   const detail = makeDetailTexture();
   const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: detail });
+
+  // ---- zones: one world-space mask (R = residential, G = field) read by the terrain shader, so every
+  // brush stroke merges into a single painted patch (no stacked circles). The hook is installed here, at
+  // creation, before weather.js wraps the material's onBeforeCompile for snow / rain / autumn.
+  const ZONE_PX = 2;   // mask pixels per metre
+  const zonePx = Math.min(2048, Math.round(SIZE * ZONE_PX));
+  const zoneCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+  let zoneTex = null;
+  if (zoneCanvas) {
+    zoneCanvas.width = zoneCanvas.height = zonePx;
+    zoneTex = new THREE.CanvasTexture(zoneCanvas);
+    zoneTex.flipY = false;   // canvas row = world z
+    zoneTex.generateMipmaps = false;
+    zoneTex.minFilter = zoneTex.magFilter = THREE.LinearFilter;
+    zoneTex.wrapS = zoneTex.wrapT = THREE.ClampToEdgeWrapping;
+  }
+  const zoneU = {
+    uZoneMap: { value: zoneTex }, uZoneSize: { value: SIZE }, uZoneOn: { value: 0 },
+    uResTint: { value: RESIDENTIAL_TINT.clone() }, uFieldTint: { value: FIELD_TINT.clone() }, uFieldDark: { value: FIELD_DARK.clone() },
+  };
+  terrainMat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, zoneU);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vZoneXZ;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvZoneXZ = ( modelMatrix * vec4( transformed, 1.0 ) ).xz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+uniform sampler2D uZoneMap; uniform float uZoneSize; uniform float uZoneOn;
+uniform vec3 uResTint; uniform vec3 uFieldTint; uniform vec3 uFieldDark;
+varying vec2 vZoneXZ;
+float zHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+float zNoise( vec2 p ) {
+  vec2 i = floor( p ); vec2 f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( zHash( i ), zHash( i + vec2( 1.0, 0.0 ) ), f.x ), mix( zHash( i + vec2( 0.0, 1.0 ) ), zHash( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
+}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+if ( uZoneOn > 0.5 ) {
+  vec2 zm = texture2D( uZoneMap, vZoneXZ / uZoneSize ).rg;
+  float jit = ( zNoise( vZoneXZ * 0.9 ) - 0.5 ) * 0.22;   // brushy, slightly uneven edge
+  float res = smoothstep( 0.32 + jit, 0.6 + jit, zm.r );
+  float fld = smoothstep( 0.32 + jit, 0.6 + jit, zm.g );
+  float resRim = smoothstep( 0.18 + jit, 0.34 + jit, zm.r ) * ( 1.0 - smoothstep( 0.34 + jit, 0.52 + jit, zm.r ) );
+  float fldRim = smoothstep( 0.18 + jit, 0.34 + jit, zm.g ) * ( 1.0 - smoothstep( 0.34 + jit, 0.52 + jit, zm.g ) );
+  vec3 c = diffuseColor.rgb;
+  c = mix( c, uResTint, res * 0.32 );
+  float furrow = 0.5 + 0.5 * sin( vZoneXZ.y * 3.14159 );   // 2 m rows, continuous across strokes
+  c = mix( c, mix( uFieldDark, uFieldTint, smoothstep( 0.25, 0.75, furrow ) ), fld * 0.62 );
+  c *= 1.0 - 0.16 * max( resRim, fldRim );                 // soft outline only around the outer border
+  diffuseColor.rgb = c;
+}`);
+  };
+  terrainMat.customProgramCacheKey = () => 'terrain-zones';
+  let zoneSig = '';
+  // Redraws the mask when the zone set changes (cheap to call every frame).
+  function setZones(zones = []) {
+    let sum = 0;
+    for (const z of zones) sum += z.id;
+    const sig = `${zones.length}|${sum}`;
+    if (sig === zoneSig || !zoneCanvas) return;
+    zoneSig = sig;
+    const ctx = zoneCanvas.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, zonePx, zonePx);
+    ctx.globalCompositeOperation = 'lighter';   // channels add: residential (R) and field (G) never mix up
+    const k = zonePx / SIZE;
+    for (const z of zones) {
+      ctx.fillStyle = z.kind === 'field' ? 'rgb(0,255,0)' : 'rgb(255,0,0)';
+      ctx.beginPath();
+      ctx.arc(z.x * k, z.z * k, z.r * k, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    zoneTex.needsUpdate = true;
+    zoneU.uZoneOn.value = zones.length > 0 ? 1 : 0;
+  }
   const cellsPerChunk = Math.max(1, Math.round(CHUNK / CELL));
   const nChunks = Math.ceil(G / cellsPerChunk);
 
@@ -348,7 +423,6 @@ export function createTerrainMesh(terrain) {
   let unowned = null;          // Float32Array(count) or null when everything is owned
   let territorySig = '';
   let lastWear = null;
-  let lastZones = [];
 
   function setTerritory(territory) {
     const owned = territory && territory.owned;
@@ -387,34 +461,11 @@ export function createTerrainMesh(terrain) {
     recolor();
   }
 
-  // Recolour: base -> zone tint -> wear (dirt paths on top) -> unowned dimming, then copy into the chunks.
+  // Recolour: base -> wear (dirt paths) -> unowned dimming, then copy into the chunks. Zones are painted by
+  // the shader from the zone mask (setZones).
   function recolor() {
     colors.set(base);
     const wear = lastWear;
-    const zones = lastZones;
-    for (const z of zones) {
-      const residential = z.kind === 'residential';
-      const ix0 = Math.max(0, Math.floor((z.x - z.r) / CELL));
-      const ix1 = Math.min(G, Math.ceil((z.x + z.r) / CELL));
-      const iz0 = Math.max(0, Math.floor((z.z - z.r) / CELL));
-      const iz1 = Math.min(G, Math.ceil((z.z + z.r) / CELL));
-      for (let iz = iz0; iz <= iz1; iz++) {
-        for (let ix = ix0; ix <= ix1; ix++) {
-          const d = Math.hypot(ix * CELL - z.x, iz * CELL - z.z);
-          if (d > z.r) continue;
-          const i = (iz * VERTS + ix) * 3;
-          tmp.setRGB(colors[i], colors[i + 1], colors[i + 2]);
-          if (residential) {
-            tmp.lerp(RESIDENTIAL_TINT, 0.22);
-          } else {
-            // ploughed furrows: alternate rows light / dark
-            tmp.lerp(iz % 2 === 0 ? FIELD_TINT : FIELD_DARK, 0.6);
-          }
-          colors[i] = tmp.r; colors[i + 1] = tmp.g; colors[i + 2] = tmp.b;
-        }
-      }
-    }
-
     if (wear && wear.length) {
       const wg = Math.round(Math.sqrt(wear.length));   // wear grid is derived from the array itself
       const wcell = SIZE / wg;
@@ -484,7 +535,7 @@ export function createTerrainMesh(terrain) {
   // the world view also pushes it via group.userData.setTerritory).
   function updateWear(wear, zones = [], territory) {
     lastWear = wear;
-    lastZones = zones;
+    setZones(zones);
     if (territory !== undefined) {
       // setTerritory() recolours on change; otherwise recolour here
       const before = territorySig;
@@ -503,7 +554,8 @@ export function createTerrainMesh(terrain) {
     terrainMat.dispose();
     waterMat.dispose();
     if (detail) detail.dispose();
+    if (zoneTex) zoneTex.dispose();
   }
 
-  return { mesh: group, water: waterGroup, updateWear, setTerritory, dispose };
+  return { mesh: group, water: waterGroup, updateWear, setTerritory, setZones, dispose };
 }
